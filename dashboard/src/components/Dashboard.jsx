@@ -45,6 +45,11 @@ export default function Dashboard() {
     setWorkspaceOpen(true);
   }, []);
 
+  const syncOverlay = useCallback(() => {
+    toOverlay({ type: 'mode', mode });
+    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements, theme });
+  }, [mode, session, dev, mcp.clientCount, config?.ui?.position, theme, toOverlay]);
+
   const onStatus = useCallback((text, kind = '') => setStatus({ text, kind }), []);
 
   const bridgeApi = useCallback(async (msg) => {
@@ -99,7 +104,7 @@ export default function Dashboard() {
         return;
       }
       if (msg.type === 'ready') {
-        toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements, theme });
+        syncOverlay();
       }
       if (msg.type === 'selected') setSelected(msg.element ?? null);
       if (msg.type === 'error') onStatus(msg.message, 'error');
@@ -119,12 +124,11 @@ export default function Dashboard() {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [actions, bridgeApi, config?.ui?.position, dev, mcp.clientCount, onStatus, previewOrigin, session, showWorkspace, targetUrl, theme, toOverlay]);
+  }, [actions, bridgeApi, onStatus, previewOrigin, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
 
   useEffect(() => {
-    toOverlay({ type: 'mode', mode });
-    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements, theme });
-  }, [mode, session, dev, mcp.clientCount, config?.ui?.position, theme, toOverlay]);
+    syncOverlay();
+  }, [syncOverlay]);
 
   useEffect(() => {
     if (selection?.selector) toOverlay({ type: 'flashSelector', selector: selection.selector });
@@ -159,7 +163,7 @@ export default function Dashboard() {
   };
 
   return <main className={`immersive${workspaceOpen ? ' workspace-open' : ''}`}>
-    {targetUrl ? <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title="Live application preview" src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={() => toOverlay({ type: 'mode', mode })} /> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
+    {targetUrl ? <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title="Live application preview" src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={syncOverlay} /> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
     {workspaceOpen && <section className="workspace-drawer" aria-label="UIDIT review workspace">
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
       {targetUrl && <Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}

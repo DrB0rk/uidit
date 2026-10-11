@@ -45,7 +45,7 @@ body.theme-light .note-actions .primary{background:#7667d8;color:#fff;border-col
 <script>
 (()=>{const controlOrigin=location.origin;const previewOrigin=(()=>{try{const value=new URLSearchParams(location.search).get('preview')||document.referrer;const origin=new URL(value).origin;const parsed=new URL(origin);return ['127.0.0.1','localhost','[::1]'].includes(parsed.hostname)?origin:''}catch{return ''}})();const $=s=>document.querySelector(s);const menu=$('#menu'),fab=$('#fab'),note=$('#note');let inspect=false;
 const send=(action,payload={})=>{if(previewOrigin)parent.postMessage({source:'uidit-control',type:'action',action,...payload},previewOrigin)};
-function setTheme(theme){const light=theme==='light';document.body.classList.toggle('theme-light',light);fab.style.setProperty('background-color',light?'#fff':'#282638','important');fab.style.setProperty('border-color',light?'#d8d6e0':'#4d486b','important');menu.style.setProperty('background-color',light?'#fff':'#1d1e26','important')}
+function setTheme(theme){const light=theme==='light';document.body.dataset.theme=theme;document.body.classList.toggle('theme-light',light);fab.style.setProperty('background-color',light?'#fff':'#282638','important');fab.style.setProperty('border-color',light?'#d8d6e0':'#4d486b','important');menu.style.setProperty('background-color',light?'#fff':'#1d1e26','important')}
 const resize=(open)=>parent.postMessage({source:'uidit-control',type:'resize',open},previewOrigin||'*');
 let drag=null, dragged=false;
 fab.addEventListener('pointerdown',e=>{drag={id:e.pointerId,x:e.clientX,y:e.clientY,moved:false};dragged=false;fab.setPointerCapture(e.pointerId)});

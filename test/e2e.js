@@ -184,6 +184,16 @@ try {
   await page.locator('.item').filter({ hasText: '16px' }).getByRole('button', { name: 'Mark as applied in source' }).click();
   await page.locator('.item').filter({ hasText: '16px' }).getByText('applied in source').waitFor();
   await page.screenshot({ path: '/tmp/uidit-e2e.png' });
+  await page.reload();
+  await page.locator('.workspace-drawer').waitFor();
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark', 'theme preference should survive a dashboard reload');
+  let reloadedControls;
+  for (let i = 0; i < 50 && !reloadedControls; i++) {
+    reloadedControls = page.frames().find((f) => f.url().includes('/floating?'));
+    if (!reloadedControls) await page.waitForTimeout(100);
+  }
+  assert.ok(reloadedControls, 'floating controls should return after a dashboard reload');
+  await reloadedControls.waitForFunction(() => document.body.dataset.theme === 'dark');
   console.log('  ok  current workspace, floating controls, inspect, comments, context actions, drawing, edits and preferences');
 } finally {
   if (b) await b.close();
