@@ -376,10 +376,14 @@ export function startServer({ cwd = process.cwd(), port = 7717, controlPort = st
       });
       upstream.on('upgrade', (upRes, upSocket, upHead) => {
         const lines = Object.entries(upRes.headers).map(([k, v]) => `${k}: ${v}`);
-        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`);
-        if (upHead?.length) socket.unshift(upHead);
-        if (head?.length) upSocket.unshift(head);
-        upSocket.pipe(socket).pipe(upSocket);
+        socket.write(`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage || 'Switching Protocols'}\r\n${lines.join('\r\n')}\r\n\r\n`);
+        // These bytes have already passed each side's HTTP upgrade parser. They
+        // must be written to the opposite socket, never unshifted back into the
+        // same socket's readable WebSocket parser.
+        if (upHead?.length) socket.write(upHead);
+        if (head?.length) upSocket.write(head);
+        socket.pipe(upSocket);
+        upSocket.pipe(socket);
       });
       upstream.on('error', () => socket.destroy());
       upstream.end();

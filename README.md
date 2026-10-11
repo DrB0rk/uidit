@@ -183,6 +183,20 @@ npm run build:dashboard   # build the UI (done automatically on first run)
 npm test                  # unit, proxy, browser and cross-stack suites
 ```
 
+### Preview compatibility checks
+
+`npm test` starts real local dev servers and checks them in Chromium through the
+UIDIT preview and overlay. The current matrix covers:
+
+- Vite vanilla SPA, React 19, Vue 3, and Svelte 5 (including a React HMR update
+  and an app-owned JSON API request)
+- Astro 7 dev server with file-based routes
+- Plain Node HTTP with an IPv6-only listener and chunked HTML responses
+
+This exercises the local dev-server preview path, including root-relative assets,
+route forwarding, the review overlay, and Vite's WebSocket HMR connection. It does
+not claim production deployment or framework-specific server adapter coverage.
+
 `npm test` runs 21 unit and proxy tests, a browser suite that drives the real
 dashboard against a fixture dev server, and a cross-stack check that renders two
 differently shaped servers — one IPv6-only with chunked HTML, one with a redirect,

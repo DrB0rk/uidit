@@ -534,6 +534,7 @@ kbd {
 .immersive.workspace-open { background: var(--surface); }
 .immersive-preview { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); border: 1px solid #dedee7; border-radius: 18px; background: #f4f3ed; box-shadow: 0 12px 36px #17182220; }
 .immersive.workspace-open .immersive-preview { right: auto; width: calc(100% - min(420px, 100vw) - 12px); border-right: 0; border-top-right-radius: 18px; border-bottom-right-radius: 18px; transition: width .22s cubic-bezier(.2,.75,.24,1); }
+.immersive.workspace-open .immersive-preview { border-color: var(--surface); box-shadow: none; }
 .immersive.workspace-open .immersive-empty { right: min(420px, 100vw); }
 .immersive-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--fg); text-align: center; }
 .immersive-empty h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
@@ -541,6 +542,9 @@ kbd {
 .workspace-drawer { position: absolute; z-index: 20; inset: 0 0 0 auto; width: min(420px, 100vw); display: flex; flex-direction: column; min-height: 0; color: var(--fg); background: var(--surface); animation: drawer-in .22s cubic-bezier(.2,.75,.24,1); }
 @keyframes drawer-in { from { transform: translateX(102%); } to { transform: translateX(0); } }
 .workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 19px 13px; border-bottom: 1px solid var(--border); flex: none; }
+.workspace-head-actions { display: flex; align-items: center; gap: 8px; }
+.theme-toggle { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--fg-muted); background: var(--raised); font: 550 11px var(--font); cursor: pointer; }
+.theme-toggle:hover { color: var(--fg); border-color: var(--accent-text); }
 .workspace-brand { font-size: 16px; font-weight: 750; letter-spacing: -.5px; }
 .workspace-brand span { padding-left: 6px; color: var(--fg-subtle); font-size: 10px; font-weight: 500; letter-spacing: .08em; }
 .workspace-caption { margin-top: 3px; color: var(--fg-muted); font-size: 11px; }

@@ -47,6 +47,19 @@ try {
   // Floating control expands, exposes grouped actions, and toggles closed.
   const floating = page.frames().find((f) => f.url().includes('/floating?'));
   assert.ok(floating, 'floating control frame did not load');
+  const themeToggle = page.getByRole('button', { name: 'Switch to light mode' });
+  await themeToggle.click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  await floating.waitForFunction(() => document.body.classList.contains('theme-light'));
+  const lightSidebar = await page.locator('.workspace-drawer').evaluate((el) => getComputedStyle(el).backgroundColor);
+  const lightFrame = await page.locator('iframe.immersive-preview').evaluate((el) => getComputedStyle(el).borderTopColor);
+  await floating.waitForFunction(() => getComputedStyle(document.querySelector('.fab')).backgroundColor === 'rgb(255, 255, 255)');
+  const lightButton = await floating.locator('.fab').evaluate((el) => getComputedStyle(el).backgroundColor);
+  assert.equal(lightFrame, lightSidebar, 'preview frame should blend into the sidebar surface');
+  assert.match(lightButton, /rgb\(255, 255, 255\)/, 'floating button should use the light theme');
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+  await floating.waitForFunction(() => !document.body.classList.contains('theme-light'));
   await floating.locator('.fab').click();
   await floating.locator('.menu.open').waitFor();
   assert.equal(await floating.locator('.action-section').count(), 3);

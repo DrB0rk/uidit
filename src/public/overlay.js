@@ -406,7 +406,12 @@
     if (msg.type === 'state') {
       if (!savedAnchor) setAnchor(msg.position === 'bottom-right' ? 'right-bottom' : 'left-bottom');
       if (Array.isArray(msg.comments) && Array.isArray(msg.elements)) { visualState = { comments: msg.comments, elements: msg.elements }; renderVisuals(); }
-      controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'state', ...msg }, controlOrigin); return;
+      // Keep the bridge's trusted discriminator after spreading dashboard
+      // state, which carries its own `source` field.
+      controls.contentWindow?.postMessage({ ...msg, source: 'uidit-preview', type: 'state' }, controlOrigin); return;
+    }
+    if (msg.type === 'theme' && ['light', 'dark'].includes(msg.theme)) {
+      controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'theme', theme: msg.theme }, controlOrigin); return;
     }
     if (msg.type === 'drawMode') { setDrawingTool(msg.tool); return; }
     if (msg.type === 'escape') { controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin); }
