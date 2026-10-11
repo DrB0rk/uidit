@@ -1,11 +1,15 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './store.js';
 import * as flowStore from './flow-store.js';
+import * as taskStore from './tasks.js';
+import { resolveElementSource } from './source-map.js';
+import { projectContext } from './project-context.js';
 import { discoverTargets } from './discover.js';
 import { createHub } from './realtime.js';
 
@@ -255,10 +259,35 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
       // uidit owns a fixed set of API routes. Anything else under /api/ belongs to
       // the previewed app — real apps use /api/* too, so claiming the whole namespace
       // would break their data loading.
-      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|comments|edit|collaboration|flows)(?:\/|$)/;
+      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|elements?|comments?|edits?|collaboration|flows|tasks|proposals|browser|git|project)(?:\/|$)/;
       if (!previewOnly && UIDIT_API.test(route)) {
         if (route === '/api/state') {
-          return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd), collaboration: collaborationManager?.status() ?? { enabled: false } });
+          const config = store.readConfig(cwd);
+          return json(res, 200, { config, session: store.readSession(cwd), collaboration: collaborationManager?.status() ?? { enabled: false }, browserContext: config?.ui?.allowBrowserInspection ? hub.browserContext : null, browserDiagnostics: config?.ui?.allowBrowserInspection ? hub.browserDiagnostics : [] });
+        }
+        if (route === '/api/browser/context' && req.method === 'POST') {
+          const body = await readBody(req); const target = store.readConfig(cwd)?.targetUrl;
+          if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Live browser inspection is disabled in Settings' });
+          if (!body || typeof body.url !== 'string' || !target || new URL(body.url).origin !== new URL(target).origin) return json(res, 403, { error: 'Browser context did not match the configured local preview' });
+          const context = { url: body.url.slice(0, 2000), title: String(body.title ?? '').slice(0, 200), viewport: { width: Math.max(1, Math.min(10000, Number(body.viewport?.width) || 1)), height: Math.max(1, Math.min(10000, Number(body.viewport?.height) || 1)), dpr: Math.max(.5, Math.min(5, Number(body.viewport?.dpr) || 1)) }, readyState: ['loading','interactive','complete'].includes(body.readyState) ? body.readyState : 'unknown', nodes: Array.isArray(body.nodes) ? body.nodes.slice(0, 300).map((node) => ({ selector: String(node.selector ?? '').slice(0, 1000), tag: String(node.tag ?? '').slice(0, 30), role: typeof node.role === 'string' ? node.role.slice(0, 80) : null, name: String(node.name ?? '').slice(0, 240), text: String(node.text ?? '').slice(0, 300), alt: typeof node.alt === 'string' ? node.alt.slice(0, 500) : null, bounds: node.bounds && [node.bounds.x,node.bounds.y,node.bounds.width,node.bounds.height].every(Number.isFinite) ? Object.fromEntries(['x','y','width','height'].map((key) => [key, Math.max(-10000, Math.min(10000, node.bounds[key]))])) : null, styles: node.styles && typeof node.styles === 'object' ? Object.fromEntries(Object.entries(node.styles).filter(([key,value]) => ['display','position','color','backgroundColor','fontSize','fontWeight','lineHeight','padding','margin','gap','overflow'].includes(key) && typeof value === 'string').slice(0,24).map(([key,value]) => [key,value.slice(0,120)])) : {} })) : [], at: new Date().toISOString() };
+          hub.notifyBrowserContext(context); return json(res, 200, { ok: true });
+        }
+        if (route === '/api/browser/diagnostics' && req.method === 'POST') {
+          if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Live browser inspection is disabled in Settings' });
+          const body = await readBody(req); const entries = (Array.isArray(body.entries) ? body.entries : []).slice(0, 30).map((item) => ({ kind: ['console','network','page','hmr'].includes(item.kind) ? item.kind : 'page', message: String(item.message ?? '').slice(0, 1000).replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/([?&](?:token|key|secret|password)=)[^&\s]*/gi, '$1[redacted]'), url: typeof item.url === 'string' ? item.url.slice(0, 2000) : null, at: new Date().toISOString() }));
+          hub.notifyBrowserDiagnostics(entries); return json(res, 200, { ok: true });
+        }
+        if (route === '/api/browser/action-result' && req.method === 'POST') {
+          if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Live browser inspection is disabled in Settings' });
+          const body = await readBody(req); let result = body.result;
+          if (result?.screenshot && typeof result.screenshot === 'string') {
+            const match = result.screenshot.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/);
+            if (!match || match[1].length > 3_400_000) throw new Error('invalid or oversized browser screenshot');
+            const bytes = Buffer.from(match[1], 'base64'); if (bytes.length > 2_500_000) throw new Error('browser screenshot exceeds 2.5 MiB');
+            const directory = path.join(store.uiditDir(cwd), 'artifacts'); fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+            const filename = `browser-${crypto.randomUUID()}.jpg`; fs.writeFileSync(path.join(directory, filename), bytes, { mode: 0o600 }); result = { artifact: `.uidit/artifacts/${filename}`, mimeType: 'image/jpeg', bytes: bytes.length };
+          }
+          hub.resolveBrowserAction(String(body.id ?? ''), { ok: body.ok === true, error: String(body.error ?? '').slice(0, 500), result }); return json(res, 200, { ok: true });
         }
         if (route === '/api/collaboration' && req.method === 'GET') return json(res, 200, collaborationManager?.status() ?? { enabled: false });
         if (route === '/api/collaboration/room' && req.method === 'POST') {
@@ -299,6 +328,10 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         if (route === '/api/config' && req.method === 'POST') {
           const body = await readBody(req);
           if (body.targetUrl) safeTargetUrl(body.targetUrl);
+          if (body.ui && typeof body.ui === 'object') {
+            for (const key of ['allowBrowserInspection', 'defaultOpen', 'inspectionDefault']) if (body.ui[key] !== undefined && typeof body.ui[key] !== 'boolean') throw new Error(`ui.${key} must be boolean`);
+          }
+          if (body.mcp && typeof body.mcp === 'object') for (const key of ['enabled','allowAgentWrites','allowAgentServerControl','allowBrowserControl']) if (body.mcp[key] !== undefined && typeof body.mcp[key] !== 'boolean') throw new Error(`mcp.${key} must be boolean`);
           const config = store.writeConfig(cwd, body);
           hub.notifyConfig();
           hub.notify();
@@ -349,8 +382,39 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
           hub.notify();
           return json(res, 200, { ok: true, session: store.readSession(cwd) });
         }
-        return json(res, 404, { error: 'unknown uidit api route' });
+        const handledBelow = route === '/api/project/context' || route === '/api/tasks' || route.startsWith('/api/tasks/') || route.startsWith('/api/artifacts/');
+        if (!handledBelow) return json(res, 404, { error: 'unknown uidit api route' });
       }
+      if (route === '/api/project/context' && req.method === 'GET') return json(res, 200, projectContext(cwd));
+      if (route === '/api/tasks' && req.method === 'GET') { const session = store.readSession(cwd); return json(res, 200, { tasks: session.tasks, evidence: session.evidence }); }
+      if (route === '/api/tasks' && req.method === 'POST') { const record = taskStore.createTask(cwd, await readBody(req)); hub.notify(); return json(res, 201, { task: record, session: store.readSession(cwd) }); }
+      const browserArtifact = route.match(/^\/api\/artifacts\/(browser-[0-9a-f-]{36}\.jpg)$/i);
+      if (browserArtifact && req.method === 'GET') {
+        const file = path.join(store.uiditDir(cwd), 'artifacts', browserArtifact[1]);
+        if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return json(res, 404, { error: 'artifact not found' });
+        res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' }); fs.createReadStream(file).pipe(res); return;
+      }
+      const taskCapture = route.match(/^\/api\/tasks\/([^/]+)\/captures\/(baseline|candidate)$/);
+      if (taskCapture && req.method === 'POST') {
+        if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Enable live browser inspection before capturing task evidence' });
+        const task = store.readSession(cwd).tasks.find((item) => item.id === decodeURIComponent(taskCapture[1]));
+        if (!task) return json(res, 404, { error: 'task not found' });
+        const captured = await hub.requestBrowserAction({ type: 'screenshot' }, 20000);
+        const evidence = taskStore.addEvidence(cwd, task.id, { type: 'visual-diff', result: 'review_required', summary: `${taskCapture[2]} screenshot captured for reviewer comparison`, reference: captured.result?.artifact ?? null, metadata: { capture: taskCapture[2], viewport: hub.browserContext?.viewport ?? null, url: hub.browserContext?.url ?? null, git: projectContext(cwd).git } }, { actor: 'reviewer' });
+        hub.notify(); return json(res, 201, { evidence, session: store.readSession(cwd) });
+      }
+      const taskEvidence = route.match(/^\/api\/tasks\/([^/]+)\/evidence$/);
+      if (taskEvidence && req.method === 'POST') { const record = taskStore.addEvidence(cwd, decodeURIComponent(taskEvidence[1]), await readBody(req), { actor: 'reviewer' }); if (!record) return json(res, 404, { error: 'task not found' }); hub.notify(); return json(res, 201, { evidence: record, session: store.readSession(cwd) }); }
+      const taskRoute = route.match(/^\/api\/tasks\/([^/]+)$/);
+      if (taskRoute && req.method === 'PATCH') { const body = await readBody(req); const { expectedRevision, ...patch } = body; const record = taskStore.updateTask(cwd, decodeURIComponent(taskRoute[1]), patch, { expectedRevision, actor: 'reviewer', reviewer: true }); if (!record) return json(res, 404, { error: 'task not found' }); hub.notify(); return json(res, 200, { task: record, session: store.readSession(cwd) }); }
+      if (route === '/api/proposals' && req.method === 'GET') return json(res, 200, { proposals: store.readSession(cwd).proposals });
+      if (route === '/api/proposals' && req.method === 'POST') { const record = taskStore.createProposal(cwd, await readBody(req), { actor: 'reviewer' }); hub.notify(); return json(res, 201, { proposal: record, session: store.readSession(cwd) }); }
+      const proposalRoute = route.match(/^\/api\/proposals\/([^/]+)$/);
+      if (proposalRoute && req.method === 'PATCH') { const body = await readBody(req); const record = taskStore.updateProposal(cwd, decodeURIComponent(proposalRoute[1]), body.status, { actor: 'reviewer' }); if (!record) return json(res, 404, { error: 'proposal not found' }); hub.notify(); return json(res, 200, { proposal: record, session: store.readSession(cwd) }); }
+      const reattach = route.match(/^\/api\/comments\/([^/]+)\/reattach$/);
+      if (reattach && req.method === 'POST') { const body = await readBody(req); const record = store.reattachComment(cwd, decodeURIComponent(reattach[1]), body.elementId); if (!record) return json(res, 404, { error: 'comment or element not found' }); hub.notify(); return json(res, 200, { comment: record, session: store.readSession(cwd) }); }
+      const sourceMatch = route.match(/^\/api\/elements\/([^/]+)\/source$/);
+      if (sourceMatch && req.method === 'GET') { const element = store.readSession(cwd).elements.find((item) => item.id === decodeURIComponent(sourceMatch[1])); if (!element) return json(res, 404, { error: 'element not found' }); return json(res, 200, await resolveElementSource(cwd, element)); }
 
       if (route.startsWith('/proxy/')) {
         const config = store.readConfig(cwd);

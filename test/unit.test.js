@@ -6,6 +6,11 @@ import path from 'node:path';
 import * as store from '../src/server/store.js';
 import { injectIntoHtml } from '../src/server/server.js';
 import { triageFeedback } from '../src/server/triage.js';
+import { routeIdentity, recoverAnchor, anchorFor } from '../src/server/identity.js';
+import * as taskStore from '../src/server/tasks.js';
+import { impactGraph, gitContext, projectContext } from '../src/server/project-context.js';
+import { auditBrowserContext } from '../src/server/audit.js';
+import { exportFlowAsPlaywright } from '../src/server/flow-export.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -30,15 +35,124 @@ test('init is idempotent and keeps existing feedback', () => {
   assert.equal(store.readSession(cwd).comments.length, 1);
 });
 
-test('elements get a stable id derived from their selector', () => {
+test('element identity is stable per route, scoped across routes, and carries a recoverable anchor', () => {
   const cwd = tmpProject();
   store.init(cwd);
-  const a = store.upsertElement(cwd, { selector: '#pay', tag: 'BUTTON' });
-  const b = store.upsertElement(cwd, { selector: '#pay', tag: 'BUTTON', text: 'Pay now' });
+  const a = store.upsertElement(cwd, { selector: '#pay', tag: 'BUTTON', role: 'button', accessibleName: 'Pay now', text: 'Pay now', page: 'http://localhost:3000/cart?r=123' });
+  const b = store.upsertElement(cwd, { selector: '#pay', tag: 'BUTTON', role: 'button', accessibleName: 'Pay now', text: 'Pay now', page: 'http://localhost:3000/cart?r=987' });
   assert.equal(a.id, b.id);
+  const otherRoute = store.upsertElement(cwd, { selector: '#pay', tag: 'BUTTON', page: 'http://localhost:3000/checkout' });
+  assert.notEqual(a.id, otherRoute.id);
+  assert.equal(routeIdentity('http://localhost:3000/cart?r=1'), routeIdentity('http://localhost:3000/cart?r=2'));
+  assert.equal(typeof b.anchor.fingerprint, 'string');
   const session = store.readSession(cwd);
-  assert.equal(session.elements.length, 1);
-  assert.equal(session.elements[0].text, 'Pay now');
+  assert.equal(session.elements.length, 2);
+  assert.equal(session.elements.find((item) => item.id === a.id).text, 'Pay now');
+});
+
+test('anchor recovery refuses ambiguous matches and never crosses routes', () => {
+  const original = { ...anchorFor({ selector: '.old', tag: 'BUTTON', role: 'button', accessibleName: 'Continue checkout', text: 'Continue checkout', page: 'http://localhost:3000/cart' }) };
+  const candidate = { selector: '.new', tag: 'BUTTON', role: 'button', accessibleName: 'Continue checkout', text: 'Continue checkout', page: 'http://localhost:3000/cart' };
+  assert.equal(recoverAnchor(original, [candidate]).status, 'recovered');
+  assert.equal(recoverAnchor(original, [candidate, { ...candidate, selector: '.other' }]).status, 'ambiguous');
+  assert.equal(recoverAnchor(original, [{ ...candidate, page: 'http://localhost:3000/checkout' }]).status, 'missing');
+});
+
+test('v1 sessions migrate with a preserved backup and retain legacy ids', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  const file = path.join(cwd, '.uidit', 'session.json');
+  fs.writeFileSync(file, JSON.stringify({ version: 1, revision: 7, elements: [{ id: 'el-legacy', selector: '#pay', page: 'http://localhost/cart', tag: 'BUTTON' }], comments: [{ id: 'cm-old', elementId: 'el-legacy', text: 'keep' }], edits: [] }));
+  const migrated = store.readSession(cwd);
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.elements[0].id, 'el-legacy');
+  assert.equal(migrated.comments[0].originalAnchor.selector, '#pay');
+  assert.ok(fs.readdirSync(path.dirname(file)).some((name) => name.includes('v1-backup')));
+});
+
+test('newer session schemas are preserved and refused instead of downgraded', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  const file = path.join(cwd, '.uidit', 'session.json');
+  fs.writeFileSync(file, JSON.stringify({ version: 3, tasks: [{ id: 'new-schema' }], custom: 'keep' }));
+  assert.throws(() => store.readSession(cwd), /newer than this UIDIT release supports/);
+  assert.match(fs.readFileSync(file, 'utf8'), /"version":3/);
+});
+
+test('tasks use optimistic revisions, evidence gates verification, and reviewer-only acceptance', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  const comment = store.addComment(cwd, { text: 'Fix mobile overflow' });
+  const task = taskStore.createTask(cwd, { title: 'Fix mobile layout', commentIds: [comment.id] });
+  const claimed = taskStore.updateTask(cwd, task.id, { owner: 'agent-1', status: 'in_progress' }, { expectedRevision: 1 });
+  assert.equal(claimed.owner, 'agent-1');
+  assert.throws(() => taskStore.updateTask(cwd, task.id, { owner: 'agent-2' }, { expectedRevision: 2 }), /already claimed/);
+  assert.throws(() => taskStore.updateTask(cwd, task.id, { status: 'verified' }, { expectedRevision: 2 }), /invalid task transition/);
+  const evidence = taskStore.addEvidence(cwd, task.id, { type: 'test', result: 'passed', summary: 'Mobile overflow test passed' });
+  assert.ok(evidence.id);
+  taskStore.addEvidence(cwd, task.id, { type: 'test', result: 'failed', summary: 'A separate check failed' });
+  assert.equal(taskStore.updateTask(cwd, task.id, { status: 'implemented' }, { expectedRevision: 4 }).status, 'implemented');
+  assert.equal(taskStore.updateTask(cwd, task.id, { status: 'verified' }, { expectedRevision: 5 }).status, 'verified');
+  assert.throws(() => taskStore.updateTask(cwd, task.id, { status: 'accepted' }, { expectedRevision: 6 }), /only a reviewer/);
+  assert.equal(taskStore.updateTask(cwd, task.id, { status: 'accepted' }, { expectedRevision: 6, reviewer: true }).status, 'accepted');
+  assert.throws(() => taskStore.updateTask(cwd, task.id, { status: 'blocked' }, { expectedRevision: 1 }), /revision changed/);
+  const failedOnly = taskStore.createTask(cwd, { title: 'Failed verification' });
+  taskStore.updateTask(cwd, failedOnly.id, { status: 'in_progress' }, { expectedRevision: 1 });
+  taskStore.updateTask(cwd, failedOnly.id, { status: 'implemented' }, { expectedRevision: 2 });
+  taskStore.addEvidence(cwd, failedOnly.id, { type: 'test', result: 'failed', summary: 'Still broken' });
+  assert.throws(() => taskStore.updateTask(cwd, failedOnly.id, { status: 'verified' }, { expectedRevision: 4 }), /passing verification evidence/);
+});
+
+test('visual proposals validate allowed operations and remain reversible', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  const element = store.upsertElement(cwd, { selector: '#pay', page: 'http://localhost/' });
+  const proposal = taskStore.createProposal(cwd, { elementId: element.id, operation: 'style', title: 'More padding', changes: [{ property: 'padding', before: '8px', value: '16px' }] });
+  assert.equal(proposal.status, 'proposed');
+  assert.equal(taskStore.updateProposal(cwd, proposal.id, 'rejected').status, 'rejected');
+  assert.throws(() => taskStore.createProposal(cwd, { elementId: element.id, operation: 'style', changes: [{ property: 'background', value: 'url(javascript:alert(1))' }] }), /not allowed/);
+});
+
+test('project impact context relates observed routes, source references, comments and read-only Git data', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  const first = store.upsertElement(cwd, { selector: '#save', page: 'http://localhost/a', component: { name: 'SaveButton' } });
+  const second = store.upsertElement(cwd, { selector: '#save', page: 'http://localhost/b', component: { name: 'SaveButton' } });
+  const comment = store.addComment(cwd, { text: 'Check shared button', elementId: first.id });
+  store.updateRecord(cwd, 'comments', comment.id, { codeRefs: [{ file: 'src/SaveButton.jsx', startLine: 4, endLine: 8 }] });
+  const graph = impactGraph(cwd);
+  assert.equal(graph.coverage.observedRoutes, 2);
+  assert.equal(graph.nodes.find((node) => node.source === 'src/SaveButton.jsx').commentIds[0], comment.id);
+  assert.equal(gitContext(cwd).available, false);
+  fs.writeFileSync(path.join(cwd, '.uidit', 'design-rules.md'), 'Prefer existing spacing tokens.');
+  const context = projectContext(cwd);
+  assert.equal(context.designRules.category, 'project preference');
+  assert.match(context.designRules.content, /spacing tokens/);
+});
+
+test('comment attachment fields remain validated after caller data is merged', () => {
+  const cwd = tmpProject(); store.init(cwd);
+  assert.throws(() => store.addComment(cwd, { text: 'bad image', attachments: [{ mimeType: 'text/html', dataUrl: 'data:text/html,<script>' }] }), /compressed JPEG/);
+});
+
+test('live audit distinguishes measured findings, candidate contrast, and untested coverage', () => {
+  const report = auditBrowserContext({ url: 'http://localhost/', viewport: { width: 375, height: 800 }, nodes: [
+    { selector: 'button', tag: 'button', name: '', bounds: { x: 0, y: 10, width: 18, height: 20 }, styles: { color: 'rgb(120, 120, 120)', backgroundColor: 'rgb(255, 255, 255)' } },
+    { selector: 'div', tag: 'div', name: '', bounds: { x: 0, y: 900, width: 20, height: 20 }, styles: {} },
+  ] });
+  assert.ok(report.findings.some((finding) => finding.rule === 'accessible-name'));
+  assert.ok(report.findings.some((finding) => finding.rule === 'target-size'));
+  assert.ok(report.findings.some((finding) => finding.rule === 'text-contrast' && finding.confidence === 'medium'));
+  assert.equal(report.findings.some((finding) => finding.rule === 'horizontal-overflow' && finding.selector === 'div'), false);
+  assert.equal(report.coverage.keyboard, 'not_checked');
+});
+
+test('Playwright export makes selector drift explicit and never exports recorded input values', () => {
+  const code = exportFlowAsPlaywright({ name: 'Safe checkout', steps: [
+    { action: 'navigate', type: 'navigation', page: 'http://localhost:3000/checkout?token=private' },
+    { action: 'fill', selector: '#email', label: 'Email', value: 'private@example.com', sensitive: false },
+    { action: 'fill', selector: '#password', label: 'Password', value: 'secret', sensitive: true },
+    { action: 'click', selector: '#continue' },
+  ] });
+  assert.match(code, /Selector drift at recorded step 2/);
+  assert.match(code, /UIDIT_FLOW_VALUE_1/);
+  assert.doesNotMatch(code, /private@example\.com|secret|token=private/);
+  assert.match(code, /\.toHaveCount\(1\)/);
 });
 
 test('comments default to unresolved and can be resolved by id', () => {

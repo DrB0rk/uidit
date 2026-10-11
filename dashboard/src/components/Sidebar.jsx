@@ -257,7 +257,7 @@ function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
   );
 }
 
-function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect, onCodeRef, onStatus, onAssign, collaborators = [] }) {
+function CommentItem({ comment, element, anchorStatus, hasTask, onCreateTask, onReattach, onToggle, onUpdate, onReply, onSelect, onCodeRef, onStatus, onAssign, collaborators = [] }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(comment.text);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -283,12 +283,15 @@ function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect, 
           </button>
         </span>
       </div>
+      {anchorStatus?.status === 'missing' && <div className="anchor-notice">Element not found on this page. Its original comment and location are preserved.</div>}
+      {anchorStatus?.status === 'recovered' && anchorStatus.candidates?.[0] && <div className="anchor-notice">Possible match · {anchorStatus.candidates[0].selector}<button type="button" className="btn sm ghost" onClick={() => onReattach(comment, anchorStatus.candidates[0])}>Reattach comment</button></div>}
+      {anchorStatus?.status === 'ambiguous' && <div className="anchor-notice">Several possible matches. Choose the correct element:<div className="anchor-candidates">{anchorStatus.candidates?.map((candidate) => <button key={candidate.selector} type="button" className="btn sm ghost" onClick={() => onReattach(comment, candidate)}>{candidate.accessibleName || candidate.selector}</button>)}</div></div>}
       {editing ? <div className="edit-comment"><textarea aria-label="Edit comment" value={text} onChange={(ev) => setText(ev.target.value)} /><button className="btn sm primary" disabled={!text.trim()} onClick={async () => { await onUpdate(comment, text.trim()); setEditing(false); }}>Save note</button></div> : <div className="item-text">{comment.text}</div>}
       {comment.attachments?.length > 0 && <div className="comment-attachments" aria-label="Comment reference photos">{comment.attachments.map((image, index) => <a key={`${image.name}:${index}`} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name}><img src={image.dataUrl} alt={image.name || `Comment reference ${index + 1}`} loading="lazy" /><span>{image.name || `Reference ${index + 1}`}</span></a>)}</div>}
       {(comment.replies ?? []).map((reply) => <div className="comment-reply" key={reply.id}><strong>{reply.displayName || (reply.author === 'agent' ? 'Agent' : 'You')}</strong><span>{reply.text}</span></div>)}
       {(comment.codeRefs ?? []).map((reference, index) => <div className="code-reference" key={`${reference.file}:${reference.startLine}:${index}`}><span>Code</span><code>{reference.file}:{reference.startLine}{reference.endLine !== reference.startLine ? `–${reference.endLine}` : ''}</code></div>)}
       {collaborators.length > 0 && <label className="assignee-picker">Assigned to <select aria-label="Assign feedback" value={comment.assignee ?? ''} onChange={(event) => onAssign(comment, event.target.value || null)}><option value="">Unassigned</option>{comment.assignee && !collaborators.some((person) => person.name === comment.assignee) && <option value={comment.assignee}>{comment.assignee}</option>}{collaborators.map((person) => <option key={person.memberId} value={person.name}>{person.name}</option>)}</select></label>}
-      <div className="reply-tools"><button type="button" className="btn sm ghost" onClick={() => setReplyOpen((open) => !open)}>{replyOpen ? 'Cancel reply' : 'Reply'}</button><button type="button" className="btn sm ghost" onClick={() => setCodeOpen((open) => !open)}>{codeOpen ? 'Cancel link' : 'Link code'}</button></div>
+      <div className="reply-tools"><button type="button" className="btn sm ghost" onClick={() => setReplyOpen((open) => !open)}>{replyOpen ? 'Cancel reply' : 'Reply'}</button><button type="button" className="btn sm ghost" onClick={() => setCodeOpen((open) => !open)}>{codeOpen ? 'Cancel link' : 'Link code'}</button>{!hasTask && <button type="button" className="btn sm ghost" onClick={() => onCreateTask(comment)}>Create task</button>}</div>
       {replyOpen && <div className="edit-comment"><textarea aria-label="Reply to comment" value={replyText} onChange={(ev) => setReplyText(ev.target.value)} placeholder="Reply or ask the agent a question" /><button type="button" className="btn sm primary" disabled={!replyText.trim()} onClick={async () => { await onReply(comment, replyText.trim()); setReplyText(''); setReplyOpen(false); }}>Send reply</button></div>}
       {codeOpen && <form className="code-reference-form" onSubmit={async (event) => { event.preventDefault(); await onCodeRef(comment, { file: codeFile, startLine: Number(codeStart), endLine: Number(codeEnd || codeStart) }); setCodeFile(''); setCodeStart(''); setCodeEnd(''); setCodeOpen(false); }}><input required maxLength={500} value={codeFile} onChange={(event) => setCodeFile(event.target.value)} placeholder="src/components/Card.tsx" aria-label="Project relative file path" /><input required type="number" min="1" value={codeStart} onChange={(event) => setCodeStart(event.target.value)} placeholder="Line" aria-label="Start line" /><input type="number" min={codeStart || 1} value={codeEnd} onChange={(event) => setCodeEnd(event.target.value)} placeholder="To" aria-label="End line" /><button className="btn sm primary" type="submit">Add link</button></form>}
       {comment.drawing && <div className="annotation-chip"><span aria-hidden="true">{comment.drawing.type === 'arrow' ? '↗' : comment.drawing.type === 'rectangle' ? '▱' : comment.drawing.type === 'ellipse' ? '◯' : '〰'}</span>{comment.drawing.type} annotation</div>}
@@ -301,6 +304,11 @@ function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect, 
   );
 }
 
+function AgentTaskQueue({ tasks = [], evidence = [], onUpdate, onStatus }) {
+  const update = async (task, status) => { try { await onUpdate(task.id, { status, expectedRevision: task.revision }); onStatus(status === 'accepted' ? 'Task accepted' : status === 'cancelled' ? 'Task cancelled' : 'Task reopened', 'ok'); } catch (error) { onStatus(error.message, 'error'); } };
+  return <details className="agent-task-queue"><summary>Agent tasks · {tasks.length}</summary>{tasks.length ? <ul>{[...tasks].reverse().map((task) => <li key={task.id}><div><strong>{task.title}</strong><small>{task.status.replaceAll('_', ' ')}{task.owner ? ` · ${task.owner}` : ''}</small></div><span>{task.evidenceIds?.length ?? 0} evidence</span>{(task.evidenceIds ?? []).map((id) => evidence.find((item) => item.id === id)).filter(Boolean).slice(-2).map((item) => <small key={item.id}>{item.type}: {item.result} · {item.summary}</small>)}{task.events?.length > 0 && <details className="task-activity"><summary>Activity · {task.events.length}</summary><ol>{task.events.slice(-8).reverse().map((event) => <li key={event.id ?? `${event.type}:${event.at}`}><strong>{event.type.replaceAll('_', ' ')}</strong><span>{event.detail || event.actor}</span><time dateTime={event.at}>{fmt(event.at)}</time></li>)}</ol></details>}{task.status === 'verified' && <button type="button" className="btn sm primary" onClick={() => update(task, 'accepted')}>Accept verified work</button>}{['open','acknowledged','in_progress','blocked','reopened'].includes(task.status) && <button type="button" className="btn sm ghost" onClick={() => update(task, 'cancelled')}>Cancel task</button>}{task.status === 'accepted' && <button type="button" className="btn sm ghost" onClick={() => update(task, 'reopened')}>Reopen task</button>}</li>)}</ul> : <p>Create a task from a feedback note to track progress and evidence.</p>}</details>;
+}
+
 function FeedbackTriage({ comments, elements }) {
   const triage = triageFeedback(comments, elements);
   return <section className="feedback-triage" aria-label="Feedback triage suggestions">
@@ -311,7 +319,15 @@ function FeedbackTriage({ comments, elements }) {
   </section>;
 }
 
-function ElementItem({ element, selected, commentCount, onSelect, onDelete }) {
+function ElementItem({ element, selected, commentCount, onSelect, onDelete, findSource, onStatus }) {
+  const [source, setSource] = useState(null);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const inspectSource = async () => {
+    setSourceBusy(true);
+    try { setSource(await findSource(element.id)); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setSourceBusy(false); }
+  };
   return (
     <li className={`item${selected ? ' selected' : ''}`}>
       <div className="item-top">
@@ -333,6 +349,8 @@ function ElementItem({ element, selected, commentCount, onSelect, onDelete }) {
       {element.accessibleName && <div className="element-context"><strong>{element.role ?? element.tag}</strong><span>{element.accessibleName}</span>{element.component && <small>{element.component.framework} · {element.component.name}</small>}</div>}
       {element.text && <div className="item-text muted">{element.text.slice(0, 140)}</div>}
       {element.nearbyText && element.nearbyText !== element.text && <div className="element-nearby" title={element.nearbyText}>Nearby: {element.nearbyText.slice(0, 140)}</div>}
+      <div className="element-source-actions"><button type="button" className="btn sm ghost" onClick={inspectSource}>{sourceBusy ? 'Searching…' : source ? 'Refresh source suggestions' : 'Find source'}</button><button type="button" className="btn sm ghost" onClick={() => navigator.clipboard?.writeText(JSON.stringify({ selector: element.selector, role: element.role, accessibleName: element.accessibleName, component: element.component, ancestors: element.ancestors }, null, 2))}>Copy agent context</button></div>
+      {source && <div className="source-suggestions"><strong>{source.status === 'inferred' ? 'Suggested source · confirm manually' : 'Source unavailable'}</strong>{source.candidates?.map((candidate) => <div key={`${candidate.file}:${candidate.line}`}><code>{candidate.file}:{candidate.line}</code><small>{candidate.snippet}</small></div>)}<small>{source.limitation}</small></div>}
       <div className="item-meta">
         <span>{commentCount} comment{commentCount === 1 ? '' : 's'}</span>
         {element.ancestors?.length > 0 && <span>{element.ancestors.slice(-2).join(' ← ')}</span>}
@@ -376,6 +394,18 @@ function EditItem({ edit, element, onToggle, onDelete }) {
   );
 }
 
+function ProposalItem({ proposal, element, selected, onOverlay, onUpdate, onStatus }) {
+  const preview = async () => {
+    if (!selected) return;
+    try {
+      onOverlay({ type: 'proposalPreview', operation: proposal.operation, changes: proposal.changes });
+      await onUpdate(proposal.id, 'previewed');
+      onStatus('Proposal previewed on the selected element; source is unchanged', 'ok');
+    } catch (error) { onStatus(error.message, 'error'); }
+  };
+  return <li className="item proposal-item"><div className="item-top"><span className="tag">Agent proposal</span><span className="item-selector">{element?.selector ?? 'Unknown element'}</span><span className="tag">{proposal.status}</span></div><strong>{proposal.title}</strong><ul className="proposal-changes">{proposal.changes.map((change, index) => <li key={`${change.property}:${index}`}><code>{change.property}</code><span>{change.before ?? '—'} → {change.value}</span></li>)}</ul><div className="reply-tools"><button type="button" className="btn sm" disabled={!selected} onClick={preview}>{selected ? 'Preview on selected element' : 'Select the tagged element to preview'}</button>{proposal.status === 'previewed' && <button type="button" className="btn sm ghost" onClick={() => { onOverlay({ type: 'proposalReset' }); onStatus('Proposal preview reverted', 'ok'); }}>Revert preview</button>}</div>{proposal.status !== 'rejected' && proposal.status !== 'accepted' && <div className="reply-tools"><button type="button" className="btn sm primary" onClick={() => onUpdate(proposal.id, 'accepted')}>Accept request</button><button type="button" className="btn sm ghost" onClick={() => onUpdate(proposal.id, 'rejected')}>Reject</button></div>}<small className="muted">Preview changes are temporary. Accepting records approval; source changes still need implementation.</small></li>;
+}
+
 export function toMarkdown(session) {
   const lines = ['# uidit feedback', ''];
   const byElement = new Map(session.elements.map((e) => [e.id, e]));
@@ -404,7 +434,7 @@ const TABS = [
   ['changes', 'Changes'],
 ];
 
-export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, page, collaboration, tab: controlledTab, onTab, showTabs = true }) {
+export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSelect, actions, onOverlay, onStatus, page, collaboration, tab: controlledTab, onTab, showTabs = true }) {
   const [localTab, setLocalTab] = useState('feedback');
   const tab = controlledTab ?? localTab;
   const setTab = onTab ?? setLocalTab;
@@ -441,6 +471,8 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
   const addCodeReference = run((comment, reference) => actions.patch('comments', comment.id, { codeRefs: [...(comment.codeRefs ?? []), reference] }), 'Code reference added');
   const setCommentStatus = run((comment, status) => actions.patch('comments', comment.id, { status }), 'Feedback status updated');
   const assignComment = run((comment, assignee) => actions.patch('comments', comment.id, { assignee }), 'Feedback assignment updated');
+  const createTask = run((comment) => actions.createTask({ title: comment.text.slice(0, 200), commentIds: [comment.id] }), 'Agent task created');
+  const reattachComment = run(async (comment, candidate) => { const { element } = await actions.element(candidate); return actions.reattachComment(comment.id, element.id); }, 'Comment reattached');
 
   const [filter, setFilter] = useState('open');
   const [query, setQuery] = useState('');
@@ -501,6 +533,10 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
                 key={c.id}
                 comment={c}
                 element={session.elements.find((e) => e.id === c.elementId)}
+                anchorStatus={anchorStatuses[c.id]}
+                hasTask={(session.tasks ?? []).some((task) => task.commentIds?.includes(c.id))}
+                onCreateTask={createTask}
+                onReattach={reattachComment}
                 onToggle={toggleComment}
                 onUpdate={updateComment}
                 onReply={replyComment}
@@ -512,6 +548,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
               />
             ))}
           </ul>
+          <AgentTaskQueue tasks={session.tasks} evidence={session.evidence} onUpdate={actions.updateTask} onStatus={onStatus} />
         </div>
       )}
 
@@ -530,6 +567,8 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
                 commentCount={session.comments.filter((c) => c.elementId === e.id).length}
                 onSelect={onSelect}
                 onDelete={drop.bind(null, 'elements', e.id)}
+                findSource={actions.elementSource}
+                onStatus={onStatus}
               />
             ))}
           </ul>
@@ -554,6 +593,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
                 onDelete={drop.bind(null, 'edits', e.id)}
               />
             ))}
+            {[...session.proposals].reverse().map((proposal) => <ProposalItem key={proposal.id} proposal={proposal} element={session.elements.find((item) => item.id === proposal.elementId)} selected={selected?.id === proposal.elementId} onOverlay={onOverlay} onUpdate={actions.updateProposal} onStatus={onStatus} />)}
           </ul>
         </div>
       )}

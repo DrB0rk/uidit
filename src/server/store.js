@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { anchorFor, routeIdentity } from './identity.js';
 
 export const UIDIT_DIR = '.uidit';
 
@@ -16,7 +17,7 @@ export function isInitialized(cwd = process.cwd()) {
   return fs.existsSync(path.join(uiditDir(cwd), 'config.json'));
 }
 
-const EMPTY = () => ({ version: 1, revision: 0, updatedAt: null, elements: [], comments: [], edits: [], flows: [] });
+const EMPTY = () => ({ version: 2, revision: 0, updatedAt: null, elements: [], comments: [], edits: [], flows: [], tasks: [], proposals: [], evidence: [] });
 
 function writeAtomic(file, contents) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -49,8 +50,8 @@ export function readConfig(cwd = process.cwd()) {
 function defaultConfig() {
   return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
-    ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false },
-    mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false } };
+    ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false, allowBrowserInspection: false },
+    mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false, allowBrowserControl: false } };
 }
 
 export function migrateConfig(value = {}) {
@@ -75,9 +76,20 @@ export function readSession(cwd = process.cwd()) {
   if (!fs.existsSync(file)) return EMPTY();
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (Number.isSafeInteger(parsed.version) && parsed.version > 2) throw new Error(`session schema v${parsed.version} is newer than this UIDIT release supports (v2)`);
     const session = { ...EMPTY(), ...parsed, revision: Number.isSafeInteger(parsed.revision) ? parsed.revision : 0 };
-    session.comments = Array.isArray(session.comments) ? session.comments.map((comment) => ({ ...comment, status: ['open', 'in_progress', 'needs_info'].includes(comment.status) ? comment.status : 'open', codeRefs: Array.isArray(comment.codeRefs) ? comment.codeRefs : [], replies: Array.isArray(comment.replies) ? comment.replies : [], attachments: Array.isArray(comment.attachments) ? comment.attachments : [] })) : [];
+    if (!Number.isSafeInteger(parsed.version) || parsed.version < 2) {
+      const backup = `${file}.v${Number.isSafeInteger(parsed.version) ? parsed.version : 1}-backup-${Date.now()}`;
+      fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+      const byId = new Map((Array.isArray(parsed.elements) ? parsed.elements : []).map((element) => [element.id, element]));
+      session.elements = (Array.isArray(session.elements) ? session.elements : []).map((element) => ({ ...element, anchor: element.anchor ?? anchorFor(element), routeKey: element.routeKey ?? routeIdentity(element.page), anchorStatus: 'located' }));
+      session.comments = (Array.isArray(session.comments) ? session.comments : []).map((comment) => ({ ...comment, originalAnchor: comment.originalAnchor ?? byId.get(comment.elementId)?.anchor ?? (byId.has(comment.elementId) ? anchorFor(byId.get(comment.elementId)) : null), anchorStatus: comment.elementId ? 'located' : 'missing' }));
+      session.version = 2;
+      writeAtomic(file, `${JSON.stringify(session, null, 2)}\n`);
+    }
+    session.comments = Array.isArray(session.comments) ? session.comments.map((comment) => ({ ...comment, status: ['open', 'acknowledged', 'in_progress', 'implemented', 'verified', 'accepted', 'blocked', 'rejected', 'reopened', 'cancelled', 'needs_info'].includes(comment.status) ? comment.status : 'open', codeRefs: Array.isArray(comment.codeRefs) ? comment.codeRefs : [], replies: Array.isArray(comment.replies) ? comment.replies : [], attachments: Array.isArray(comment.attachments) ? comment.attachments : [] })) : [];
     session.flows = Array.isArray(session.flows) ? session.flows : [];
+    for (const collection of ['tasks', 'proposals', 'evidence']) session[collection] = Array.isArray(session[collection]) ? session[collection] : [];
     return session;
   } catch (error) {
     // Preserve corrupt user data. Returning an empty session here made the next
@@ -87,7 +99,7 @@ export function readSession(cwd = process.cwd()) {
 }
 
 export function writeSession(cwd, session) {
-  const next = { ...session, version: 1, revision: (Number(session.revision) || 0) + 1, updatedAt: new Date().toISOString() };
+  const next = { ...session, version: 2, revision: (Number(session.revision) || 0) + 1, updatedAt: new Date().toISOString() };
   fs.mkdirSync(uiditDir(cwd), { recursive: true });
   writeAtomic(path.join(uiditDir(cwd), 'session.json'), `${JSON.stringify(next, null, 2)}\n`);
   return next;
@@ -100,9 +112,12 @@ export function stableId(prefix, selector) {
 
 export function upsertElement(cwd, element) {
   const session = readSession(cwd);
-  const id = element.id ?? stableId('el', element.selector);
-  const idx = session.elements.findIndex((e) => e.id === id);
-  const record = { ...(idx >= 0 ? session.elements[idx] : {}), ...element, id };
+  const anchor = anchorFor(element);
+  const routeKey = anchor.route;
+  let idx = element.id ? session.elements.findIndex((e) => e.id === element.id) : -1;
+  if (idx < 0) idx = session.elements.findIndex((e) => (e.routeKey ?? routeIdentity(e.page)) === routeKey && e.selector === element.selector);
+  const id = idx >= 0 ? session.elements[idx].id : (element.id ?? `el-${crypto.randomUUID()}`);
+  const record = { ...(idx >= 0 ? session.elements[idx] : {}), ...element, id, routeKey, anchor, anchorStatus: 'located' };
   if (idx >= 0) session.elements[idx] = record;
   else session.elements.push(record);
   writeSession(cwd, session);
@@ -111,6 +126,7 @@ export function upsertElement(cwd, element) {
 
 export function addComment(cwd, comment) {
   const session = readSession(cwd);
+  const linkedElement = session.elements.find((element) => element.id === comment.elementId);
   const attachments = Array.isArray(comment.attachments) ? comment.attachments : [];
   if (attachments.length > 2) throw new Error('a comment can include at most 2 images');
   let attachmentBytes = 0;
@@ -120,15 +136,17 @@ export function addComment(cwd, comment) {
     if (attachmentBytes > 820_000) throw new Error('comment images exceed the combined size limit');
   }
   const record = {
+    ...comment,
     id: comment.id ?? stableId('cm', `${Date.now()}:${Math.random()}`),
     resolved: false,
     status: 'open',
     codeRefs: [],
     replies: [],
-    attachments: attachments.map(({ dataUrl, name, width, height }) => ({ dataUrl, name: typeof name === 'string' ? name.slice(0, 120) : 'reference.jpg', width: Number.isInteger(width) ? Math.max(1, Math.min(1600, width)) : null, height: Number.isInteger(height) ? Math.max(1, Math.min(1600, height)) : null, mimeType: 'image/jpeg' })),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    ...comment,
+    attachments: attachments.map(({ dataUrl, name, width, height }) => ({ dataUrl, name: typeof name === 'string' ? name.slice(0, 120) : 'reference.jpg', width: Number.isInteger(width) ? Math.max(1, Math.min(1600, width)) : null, height: Number.isInteger(height) ? Math.max(1, Math.min(1600, height)) : null, mimeType: 'image/jpeg' })),
+    originalAnchor: comment.originalAnchor ?? linkedElement?.anchor ?? (linkedElement ? anchorFor(linkedElement) : null),
+    anchorStatus: comment.elementId ? 'located' : 'missing',
   };
   session.comments.push(record);
   writeSession(cwd, session);
@@ -179,6 +197,19 @@ export function updateRecord(cwd, collection, id, patch) {
   session[collection][idx] = { ...session[collection][idx], ...patch, ...(collection === 'comments' && patch.updatedAt === undefined ? { updatedAt: new Date().toISOString() } : {}) };
   writeSession(cwd, session);
   return session[collection][idx];
+}
+
+export function reattachComment(cwd, commentId, elementId) {
+  const session = readSession(cwd);
+  const comment = session.comments.find((item) => item.id === commentId);
+  const element = session.elements.find((item) => item.id === elementId);
+  if (!comment || !element) return null;
+  const at = new Date().toISOString();
+  const anchorHistory = [...(Array.isArray(comment.anchorHistory) ? comment.anchorHistory : [])];
+  if (comment.elementId && comment.originalAnchor) anchorHistory.push({ elementId: comment.elementId, anchor: comment.originalAnchor, at });
+  Object.assign(comment, { elementId, originalAnchor: element.anchor ?? anchorFor(element), anchorStatus: 'located', anchorHistory, updatedAt: at });
+  writeSession(cwd, session);
+  return comment;
 }
 
 export function removeRecord(cwd, collection, id) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-10-11
+
+- Added route-scoped durable element IDs, recoverable comment anchors, v1 session backups, explicit reattachment, and missing/ambiguous anchor states.
+- Added source search suggestions with honest inferred provenance, read-only Git context, and an observed-only element/component/route impact graph.
+- Added versioned agent tasks, exclusive claims, append-only evidence, verified/reviewer acceptance states, and declarative visual proposals.
+- Added opt-in sanitized live DOM and diagnostics to MCP, separate browser-control permission, bounded shared-preview actions, and local task-linked baseline/candidate screenshots.
+- Added objective live-page audit findings with explicit coverage and manual-review categories.
+- Added project design guidance context, wider CSS preview controls, and Playwright flow export with fixture placeholders and selector-drift assertions.
+- Added custom and multi-pane responsive viewport previews, reversible focus/disabled state previews, and preview/revert for allowlisted CSS, text, class, and accessibility-attribute proposals.
+- Added task activity timelines and reviewer cancellation controls; expanded E2E coverage for responsive panes, state restoration, and proposal reversion.
+- Fixed comment marker clicks and thread redraws so comment replies remain interactive during scroll and inspection.
+
 ## 0.5.0 — 2026-10-11
 
 - Added a visual design workspace with desktop, tablet, and phone previews, live style directions, component controls, and screenshot comparison.

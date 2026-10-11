@@ -59,6 +59,13 @@ style properties, and undo the preview styling when you are done. Upload or past
 reference screenshot to compare it with the live page as an overlay or side by side.
 Comments accept up to two pasted or uploaded reference photos.
 
+The preview toolbar also supports custom viewport dimensions and one-, two-, or
+three-pane responsive comparisons. These panes resize the browser viewport; they do
+not emulate touch hardware or native mobile browser behavior. Component state
+controls can temporarily focus or disable a selected element and restore it. App-owned
+loading, error, empty, and success states need project fixtures and are not forced by
+generic DOM manipulation.
+
 **Quick edits** — edit text in place, set a CSS property, toggle a class, set an
 attribute, hide an element. The change applies to the preview immediately and is
 saved as an explicit `before → after` record.
@@ -78,7 +85,33 @@ Flows panel, then replay them against the connected preview. Each step can keep 
 masked page screenshot; passwords, email addresses, phone numbers, and payment
 fields are omitted. Console and failed network requests are captured only while
 a recording is active. Flow metadata and screenshots stay in the local
-`.uidit/` folder.
+`.uidit/` folder. Export a saved flow as a Playwright test; recorded input
+values are replaced with environment placeholders, and selector drift fails
+with an explicit assertion.
+
+**Agent tasks and visual review** — create a task from feedback, let an agent
+claim it, attach test or screenshot evidence, and move it through implemented
+and verified states. Only a reviewer can accept it. In **Agents → Visual task
+review**, capture local baseline and candidate screenshots for a task; UIDIT
+stores them under `.uidit/artifacts/` and displays them side by side. These are
+review evidence, not an automatic visual pass.
+
+Agents can submit allowlisted visual proposals for CSS, text, classes, and safe
+accessibility attributes. Reviewers can preview and revert these in the live page;
+approval records a request and never edits source files.
+
+**Live browser context** — enable **Live browser inspection** in Agents settings
+to share a bounded, redacted DOM snapshot and browser diagnostics with MCP.
+Browser control is a separate permission and only allows a limited set of
+actions against observed elements. Disable inspection to stop sharing page
+context. The audit tool reports measured DOM checks separately from manual
+review candidates; it does not claim full WCAG conformance.
+
+**Durable anchors and source hints** — comments preserve their original element
+anchor when markup changes. UIDIT may suggest a replacement, but ambiguous
+matches require an explicit reattach. Source search is an inferred hint that
+must be confirmed in code. Git context is read-only, and the impact view reports
+only elements and routes observed in this review session.
 
 ### Cloudflare relay setup
 
@@ -163,6 +196,14 @@ component hints when the page exposes them. Comment threads can carry project
 relative file and line references; use `uidit_link_code` to add one. Both agents
 and reviewers can set feedback progress to `open`, `in_progress`, or `needs_info`;
 resolution remains a separate completion action.
+Tasks are separate from comment resolution: agents claim them with revision
+checks, attach evidence, and report implementation and verification updates;
+only the reviewer can accept a verified task. Additional MCP tools include
+`uidit_get_live_dom`, `uidit_get_browser_diagnostics`,
+`uidit_get_element_source`, `uidit_get_impact_graph`, `uidit_get_task_queue`,
+`uidit_create_task`, `uidit_attach_evidence`, and
+`uidit_propose_visual_change`. Use `uidit_export_flow_as_playwright` to generate
+a test without exporting recorded form values.
 Feedback is project data: agents should inspect source, ask questions in comment
 threads when intent is unclear, report completed work in the thread, and resolve
 feedback only after implementing and verifying it. Brief resource updates are

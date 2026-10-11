@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const EMPTY_SESSION = { elements: [], comments: [], edits: [], updatedAt: null };
+const EMPTY_SESSION = { version: 2, elements: [], comments: [], edits: [], flows: [], tasks: [], evidence: [], proposals: [], updatedAt: null };
 
 async function req(route, method = 'GET', body) {
   const res = await fetch(route, {
@@ -26,6 +26,9 @@ export function useSession() {
   const [mcp, setMcp] = useState({ clientCount: 0 });
   const [selection, setSelection] = useState(null);
   const [collaboration, setCollaboration] = useState({ enabled: false, connected: false, participants: [] });
+  const [browserContext, setBrowserContext] = useState(null);
+  const [browserDiagnostics, setBrowserDiagnostics] = useState([]);
+  const [browserAction, setBrowserAction] = useState(null);
   const sourceRef = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -60,6 +63,9 @@ export function useSession() {
     source.addEventListener('mcp', (ev) => { if (!closed) setMcp(JSON.parse(ev.data)); });
     source.addEventListener('selection', (ev) => { if (!closed) setSelection(JSON.parse(ev.data)); });
     source.addEventListener('collaboration', (ev) => { if (!closed) setCollaboration(JSON.parse(ev.data)); });
+    source.addEventListener('browser-context', (ev) => { if (!closed) setBrowserContext(JSON.parse(ev.data)); });
+    source.addEventListener('browser-diagnostics', (ev) => { if (!closed) setBrowserDiagnostics((items) => [...items, ...JSON.parse(ev.data)].slice(-250)); });
+    source.addEventListener('browser-action', (ev) => { if (!closed) setBrowserAction(JSON.parse(ev.data)); });
     source.onerror = () => {
       if (!closed) {
         setLive(false);
@@ -99,7 +105,19 @@ export function useSession() {
     addFlowStep: (flowId, step) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/steps`, 'POST', step)),
     addFlowLog: (flowId, log) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/logs`, 'POST', log)),
     updateFlow: (flowId, patch) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}`, 'PATCH', patch)),
+    createTask: (body) => withSession(req('/api/tasks', 'POST', body)),
+    updateTask: (taskId, patch) => withSession(req(`/api/tasks/${encodeURIComponent(taskId)}`, 'PATCH', patch)),
+    addEvidence: (taskId, body) => withSession(req(`/api/tasks/${encodeURIComponent(taskId)}/evidence`, 'POST', body)),
+    reattachComment: (commentId, elementId) => withSession(req(`/api/comments/${encodeURIComponent(commentId)}/reattach`, 'POST', { elementId })),
+    createProposal: (body) => withSession(req('/api/proposals', 'POST', body)),
+    updateProposal: (proposalId, status) => withSession(req(`/api/proposals/${encodeURIComponent(proposalId)}`, 'PATCH', { status })),
+    elementSource: (elementId) => req(`/api/elements/${encodeURIComponent(elementId)}/source`),
+    browserContext: (body) => req('/api/browser/context', 'POST', body),
+    browserDiagnostics: (entries) => req('/api/browser/diagnostics', 'POST', { entries }),
+    browserActionResult: (id, result) => req('/api/browser/action-result', 'POST', { id, ...result }),
+    projectContext: () => req('/api/project/context'),
+    captureTaskSnapshot: (taskId, kind) => withSession(req(`/api/tasks/${encodeURIComponent(taskId)}/captures/${kind}`, 'POST', {})),
   };
 
-  return { config, session, status, live, dev, mcp, collaboration, selection, refresh, actions };
+  return { config, session, status, live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, refresh, actions };
 }

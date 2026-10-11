@@ -58,16 +58,29 @@ try {
   const devicePhone = page.getByRole('button', { name: 'Phone' });
   await devicePhone.click();
   await page.waitForTimeout(200);
+  frame = page.frames().find((f) => f.url().includes('/proxy/'));
   const phoneViewport = await frame.evaluate(() => innerWidth);
   assert.ok(phoneViewport >= 380 && phoneViewport <= 400, `phone preview width: ${phoneViewport}`);
   const phoneHeight = await frame.evaluate(() => innerHeight);
   assert.ok(phoneHeight >= 830 && phoneHeight <= 860, `phone preview height: ${phoneHeight}`);
   await page.getByRole('button', { name: 'Tablet' }).click();
   await page.waitForTimeout(200);
+  frame = page.frames().find((f) => f.url().includes('/proxy/'));
   const tabletViewport = await frame.evaluate(() => innerWidth);
   assert.ok(tabletViewport >= 760 && tabletViewport <= 768, `tablet preview width: ${tabletViewport}`);
   const tabletHeight = await frame.evaluate(() => innerHeight);
   assert.ok(tabletHeight >= 1000 && tabletHeight <= 1040, `tablet preview height: ${tabletHeight}`);
+  await page.getByRole('button', { name: 'Desktop' }).click();
+  await page.getByRole('button', { name: '2 views' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.preview-live-frame iframe').length === 2);
+  assert.equal(await page.locator('.viewport-label').count(), 2, 'two-pane view labels each resized preview');
+  await page.getByRole('button', { name: '3 views' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.preview-live-frame iframe').length === 3);
+  await page.getByRole('button', { name: '1 view' }).click();
+  await page.getByLabel('Custom viewport width').fill('360');
+  await page.getByLabel('Custom viewport height').fill('740');
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.preview-live-frame')?.getBoundingClientRect().width <= 361);
   await page.getByRole('button', { name: 'Desktop' }).click();
   const referencePng = await page.screenshot({ type: 'png' });
   await page.locator('.reference-drop input').setInputFiles({ name: 'review-reference.png', mimeType: 'image/png', buffer: referencePng });
@@ -133,6 +146,30 @@ try {
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.edits.some((edit) => edit.property === 'padding' && edit.after === '16px'));
   assert.equal(await frame.locator('#pay').evaluate((el) => getComputedStyle(el).padding), '16px');
   await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'Focus', exact: true }).click();
+  await frame.waitForFunction(() => document.activeElement?.id === 'pay');
+  await page.getByRole('button', { name: 'Disabled', exact: true }).click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.disabled === true);
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.disabled === false);
+  const previewProposal = async (operation, changes) => page.evaluate(({ operation, changes }) => document.querySelector('iframe.immersive-preview').contentWindow.postMessage({ source: 'uidit-dashboard', type: 'proposalPreview', operation, changes }, '*'), { operation, changes });
+  const resetProposal = async () => page.evaluate(() => document.querySelector('iframe.immersive-preview').contentWindow.postMessage({ source: 'uidit-dashboard', type: 'proposalReset' }, '*'));
+  await previewProposal('style', [{ property: 'border-radius', value: '11px' }]);
+  await frame.waitForFunction(() => document.querySelector('#pay')?.style.borderRadius === '11px');
+  await resetProposal();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.style.borderRadius !== '11px');
+  await previewProposal('text', [{ property: 'text', value: 'Preview only' }]);
+  await frame.waitForFunction(() => document.querySelector('#pay')?.textContent === 'Preview only');
+  await resetProposal();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.textContent !== 'Preview only');
+  await previewProposal('class', [{ property: 'class', value: 'uidit-proposal-check' }]);
+  await frame.waitForFunction(() => document.querySelector('#pay')?.classList.contains('uidit-proposal-check'));
+  await resetProposal();
+  await frame.waitForFunction(() => !document.querySelector('#pay')?.classList.contains('uidit-proposal-check'));
+  await previewProposal('attribute', [{ property: 'title', value: 'Preview only' }]);
+  await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('title') === 'Preview only');
+  await resetProposal();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('title') !== 'Preview only');
   await page.getByRole('button', { name: 'Compare all four on page' }).click();
   const variantComparison = frame.locator('#uidit-variant-compare');
   await variantComparison.waitFor();
@@ -149,9 +186,10 @@ try {
   await page.getByRole('button', { name: /Feedback/ }).click();
   await page.getByText('Give the heading more breathing room.').waitFor();
   assert.equal(await frame.locator('#uidit-context-menu').isHidden(), true);
-  await frame.locator('.uidit-comment-marker').nth(1).waitFor();
-  await frame.locator('.uidit-comment-marker').nth(1).click();
-  const markerThread = frame.locator('.uidit-comment-thread').nth(1);
+  const headingMarker = frame.locator('.uidit-comment-marker[title="Give the heading more breathing room."]');
+  await headingMarker.waitFor();
+  await headingMarker.click();
+  const markerThread = frame.locator('.uidit-comment-thread').filter({ hasText: 'Give the heading more breathing room.' }).first();
   await markerThread.locator('textarea[aria-label="Reply to comment"]').fill('Can you confirm the preferred spacing?');
   await markerThread.getByRole('button', { name: 'Reply' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.replies?.some((r) => r.text === 'Can you confirm the preferred spacing?')));
@@ -191,7 +229,6 @@ try {
   const triage = await client.callTool({ name: 'uidit_triage_feedback', arguments: {} });
   assert.equal(Boolean(triage.isError), false, JSON.stringify(triage));
   assert.ok(triage.structuredContent.suggestedOrder.some((item) => item.id === headingComment.id));
-  await client.close();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.replies?.some((r) => r.author === 'agent')));
   const commentCard = page.locator('.item').filter({ hasText: 'Give the heading more breathing room.' });
   await commentCard.getByText('I can adjust it. Is 24px appropriate?').waitFor();
@@ -202,6 +239,49 @@ try {
   await commentCard.getByRole('textbox', { name: 'Reply to comment' }).fill('Yes, please match the card spacing.');
   await commentCard.getByRole('button', { name: 'Send reply' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.replies?.some((r) => r.text === 'Yes, please match the card spacing.')));
+
+  const createdTask = await client.callTool({ name: 'uidit_create_task', arguments: { title: 'Verify heading spacing', commentIds: [headingComment.id] } });
+  assert.equal(Boolean(createdTask.isError), false, JSON.stringify(createdTask));
+  const taskId = createdTask.structuredContent.task.id;
+  const claimedTask = await client.callTool({ name: 'uidit_claim_task', arguments: { taskId, owner: 'e2e-agent', expectedRevision: 1 } });
+  assert.equal(claimedTask.structuredContent.task.status, 'in_progress');
+  const taskEvidence = await client.callTool({ name: 'uidit_attach_evidence', arguments: { taskId, type: 'test', result: 'passed', summary: 'Spacing regression check passed' } });
+  assert.equal(Boolean(taskEvidence.isError), false, JSON.stringify(taskEvidence));
+  const implementedTask = await client.callTool({ name: 'uidit_update_task', arguments: { taskId, expectedRevision: 3, status: 'implemented', changedFiles: ['src/components/Heading.jsx'], detail: 'Updated heading spacing' } });
+  assert.equal(implementedTask.structuredContent.task.status, 'implemented');
+  const verifiedTask = await client.callTool({ name: 'uidit_update_task', arguments: { taskId, expectedRevision: 4, status: 'verified', detail: 'Regression check passed' } });
+  assert.equal(verifiedTask.structuredContent.task.status, 'verified');
+  const acceptTask = await fetch(`http://127.0.0.1:${DASH}/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: JSON.stringify({ expectedRevision: 5, status: 'accepted' }) });
+  const acceptedPayload = await acceptTask.json();
+  assert.equal(acceptedPayload.task?.status, 'accepted', JSON.stringify(acceptedPayload));
+  const impact = await client.callTool({ name: 'uidit_get_impact_graph', arguments: {} });
+  assert.equal(Boolean(impact.isError), false, JSON.stringify(impact));
+  assert.ok(impact.structuredContent.impact.coverage.observedElements > 0);
+  const blockedDom = await client.callTool({ name: 'uidit_get_live_dom', arguments: {} });
+  assert.equal(blockedDom.isError, true, 'live DOM stays unavailable until the user opts in');
+  const inspectPermission = await fetch(`http://127.0.0.1:${DASH}/api/config`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: JSON.stringify({ ui: { allowBrowserInspection: true } }) });
+  assert.equal(inspectPermission.status, 200);
+  await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).browserContext?.nodes?.length > 0);
+  const liveDom = await client.callTool({ name: 'uidit_get_live_dom', arguments: {} });
+  assert.equal(Boolean(liveDom.isError), false, JSON.stringify(liveDom));
+  assert.ok(liveDom.structuredContent.nodes.some((node) => node.selector.includes('h1')));
+  const blockedControl = await client.callTool({ name: 'uidit_browser_action', arguments: { type: 'hover', selector: '#pay' } });
+  assert.equal(blockedControl.isError, true, 'browser control has its own opt-in');
+  const controlPermission = await fetch(`http://127.0.0.1:${DASH}/api/config`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: JSON.stringify({ mcp: { allowBrowserControl: true } }) });
+  assert.equal(controlPermission.status, 200);
+  const controlled = await client.callTool({ name: 'uidit_browser_action', arguments: { type: 'hover', selector: '#pay' } });
+  assert.equal(Boolean(controlled.isError), false, JSON.stringify(controlled));
+  for (const captureType of ['baseline', 'candidate']) {
+    const capture = await fetch(`http://127.0.0.1:${DASH}/api/tasks/${encodeURIComponent(taskId)}/captures/${captureType}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: '{}' });
+    const captured = await capture.json();
+    assert.equal(capture.status, 201, JSON.stringify(captured));
+    assert.match(captured.evidence.reference, /^\.uidit\/artifacts\/browser-/);
+    const image = await fetch(`http://127.0.0.1:${DASH}/api/artifacts/${captured.evidence.reference.split('/').at(-1)}`);
+    assert.equal(image.headers.get('content-type'), 'image/jpeg');
+    assert.ok((await image.arrayBuffer()).byteLength > 100);
+  }
+  await fetch(`http://127.0.0.1:${DASH}/api/config`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: JSON.stringify({ ui: { allowBrowserInspection: false }, mcp: { allowBrowserControl: false } }) });
+  await client.close();
 
   // Page context offers page-only actions and stores a page-level note.
   await frame.evaluate(() => document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 700, clientY: 700 })));
@@ -247,6 +327,10 @@ try {
   assert.equal(flowScreenshot.status, 200);
   assert.match(flowScreenshot.headers.get('content-type'), /image\/jpeg/);
   assert.ok((await flowScreenshot.arrayBuffer()).byteLength > 1000);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export Playwright test' }).click();
+  const exportedTest = await downloadPromise;
+  assert.match(exportedTest.suggestedFilename(), /Checkout-button-smoke-flow\.spec\.js/);
 
   // Each workspace section opens, and settings can be saved.
   for (const label of ['Elements', 'Changes']) {

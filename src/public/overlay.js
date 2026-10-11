@@ -14,12 +14,19 @@
   let hoverEl = null;
   let drawingTool = 'off';
   let visualState = { comments: [], elements: [] };
+  let openCommentId = null;
   let drawStart = null;
   let activeFlowId = null;
   let inputTimer = null;
   let restoreNetworkHooks = null;
   let imageLibraryPromise = null;
   let recordingCaptureQueue = Promise.resolve();
+  let browserInspectionEnabled = false;
+  let diagnosticsTimer = null;
+  let diagnosticsQueue = [];
+  let diagnosticRestore = null;
+  let componentStateRestore = null;
+  let proposalRestore = null;
 
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
@@ -79,6 +86,10 @@
     params.delete('r');
     const search = params.toString();
     return `${origin}${path}${search ? `?${search}` : ''}`;
+  };
+  const canonicalRoute = (raw) => {
+    try { const url = new URL(raw); for (const key of [...url.searchParams.keys()]) if (/^(?:r|_t|t|timestamp|cacheBust|cache_bust|utm_.+|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key); url.searchParams.sort(); return `${url.origin}${url.pathname}${url.search}`; }
+    catch { return String(raw ?? ''); }
   };
 
   function uniqueSelector(el) {
@@ -162,6 +173,66 @@
     post('record-log', { flowId: activeFlowId, kind, message: safe, url: String(url).slice(0, 2000) });
   };
   const isSensitive = (el) => el.matches('input[type="password"],input[type="email"],input[type="tel"],[autocomplete^="cc-"],[data-private]');
+  function sendBrowserContext() {
+    if (!browserInspectionEnabled) return;
+    const nodes = [...document.querySelectorAll('a,button,input,select,textarea,img,[role],[data-testid],h1,h2,h3')].slice(0, 300).map((el) => {
+      const rect = el.getBoundingClientRect(); const record = describe(el); const style = getComputedStyle(el);
+      return { selector: record.selector, tag: el.tagName, role: record.role, name: record.accessibleName, text: record.text, ...(el.tagName === 'IMG' ? { alt: el.getAttribute('alt') } : {}), bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, styles: { display: style.display, position: style.position, color: style.color, backgroundColor: style.backgroundColor, fontSize: style.fontSize, fontWeight: style.fontWeight, lineHeight: style.lineHeight, padding: style.padding, margin: style.margin, gap: style.gap, overflow: style.overflow } };
+    });
+    post('browser-context', { url: realPage(), title: document.title, viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio }, readyState: document.readyState, nodes });
+  }
+  function setBrowserInspection(enabled) {
+    browserInspectionEnabled = enabled === true;
+    if (!browserInspectionEnabled) { diagnosticRestore?.(); diagnosticRestore = null; diagnosticsQueue = []; clearTimeout(diagnosticsTimer); return; }
+    sendBrowserContext(); if (diagnosticRestore) return;
+    const originalConsoleError = console.error; const originalFetch = window.fetch; const originalXhrOpen = XMLHttpRequest.prototype.open; const originalXhrSend = XMLHttpRequest.prototype.send;
+    const addDiagnostic = (kind, message, url = null) => {
+      if (!browserInspectionEnabled) return;
+      const safe = String(message ?? '').slice(0, 1000).replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/([?&](?:token|key|secret|password)=)[^&\s]*/gi, '$1[redacted]');
+      diagnosticsQueue.push({ kind, message: safe, url: typeof url === 'string' ? url.slice(0, 2000) : null }); if (diagnosticsQueue.length > 100) diagnosticsQueue.shift();
+      clearTimeout(diagnosticsTimer); diagnosticsTimer = setTimeout(() => { const entries = diagnosticsQueue.splice(0, 30); if (entries.length) post('browser-diagnostics', { entries }); }, 250);
+    };
+    window.fetch = function (...args) { const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url; return originalFetch.apply(this, args).then((response) => { if (!response.ok) addDiagnostic('network', `HTTP ${response.status}`, requestUrl); return response; }, (error) => { addDiagnostic('network', error?.message || 'Fetch failed', requestUrl); throw error; }); };
+    XMLHttpRequest.prototype.open = function (method, url, ...rest) { this.__uiditRequestUrl = String(url ?? ''); return originalXhrOpen.call(this, method, url, ...rest); };
+    XMLHttpRequest.prototype.send = function (...args) { this.addEventListener('loadend', () => { if (this.status >= 400 || this.status === 0) addDiagnostic('network', `HTTP ${this.status || 'network error'}`, this.responseURL || this.__uiditRequestUrl); }, { once: true }); return originalXhrSend.apply(this, args); };
+    console.error = function (...args) { addDiagnostic('console', args.map((value) => typeof value === 'string' ? value : (() => { try { return JSON.stringify(value); } catch { return String(value); } })()).join(' ')); return originalConsoleError.apply(this, args); };
+    const onError = (event) => addDiagnostic('console', event.message || event.reason || 'Page error', event.filename ?? null);
+    window.addEventListener('error', onError); window.addEventListener('unhandledrejection', onError);
+    const observer = new MutationObserver(() => { if (document.querySelector('vite-error-overlay')) addDiagnostic('hmr', 'Development server reported a client build error', location.href); });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    diagnosticRestore = () => { window.fetch = originalFetch; XMLHttpRequest.prototype.open = originalXhrOpen; XMLHttpRequest.prototype.send = originalXhrSend; console.error = originalConsoleError; window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onError); observer.disconnect(); };
+  }
+  async function runBrowserAction(id, action = {}) {
+    const reply = (value) => post('browser-action-result', { id, ...value });
+    if (!browserInspectionEnabled || typeof id !== 'string') { reply({ ok: false, error: 'Live browser inspection is disabled' }); return; }
+    try {
+      if (action.type === 'screenshot') { const screenshot = await captureStepScreenshot(); if (!screenshot) throw new Error('Screenshot could not be captured'); reply({ ok: true, result: { screenshot } }); return; }
+      if (action.type === 'navigate') {
+        if (typeof action.path !== 'string' || !action.path.startsWith('/') || action.path.startsWith('//')) throw new Error('Navigation must use a local path beginning with /');
+        const proxiedPath = action.path.startsWith('/proxy/') ? action.path : `/proxy${action.path}`; const next = new URL(proxiedPath, location.origin);
+        if (next.origin !== location.origin || !next.pathname.startsWith('/proxy/')) throw new Error('Navigation is limited to the configured local preview');
+        location.assign(next.href); reply({ ok: true, result: { url: next.href } }); return;
+      }
+      const selector = typeof action.selector === 'string' ? action.selector.slice(0, 1000) : ''; const element = selector ? document.querySelector(selector) : null;
+      if (!element || element.closest?.('[data-uidit-ui]')) throw new Error('Target element was not found');
+      if (action.type === 'click') element.click();
+      else if (action.type === 'focus') element.focus();
+      else if (action.type === 'hover') element.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      else if (action.type === 'scroll') element.scrollIntoView({ block: 'center', behavior: 'instant' });
+      else if (action.type === 'fill') {
+        if (isSensitive(element)) throw new Error('Sensitive form fields cannot be controlled by an agent');
+        if (!/^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || typeof action.value !== 'string' || action.value.length > 1000) throw new Error('Fill requires a non-sensitive input and a value under 1000 characters');
+        const proto = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : element.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (setter) setter.call(element, action.value); else element.value = action.value;
+        element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (action.type === 'keypress') {
+        const key = typeof action.key === 'string' && ['Enter','Escape','Tab','ArrowDown','ArrowUp',' '].includes(action.key) ? action.key : '';
+        if (!key) throw new Error('Only Enter, Escape, Tab, arrow keys, and Space are supported');
+        element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); element.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+      } else throw new Error('Unsupported browser action');
+      setTimeout(() => { sendBrowserContext(); reply({ ok: true, result: { selector, action: action.type, url: realPage(), title: document.title } }); }, 100);
+    } catch (error) { reply({ ok: false, error: error.message }); }
+  }
   const loadImageLibrary = () => {
     if (window.htmlToImage?.toJpeg) return Promise.resolve(window.htmlToImage.toJpeg);
     if (!imageLibraryPromise) imageLibraryPromise = new Promise((resolve, reject) => {
@@ -259,6 +330,33 @@
   visuals.style.cssText = 'position:absolute;left:0;top:0;z-index:2147483646;pointer-events:none;overflow:visible;';
   document.documentElement.append(visuals);
   const svgNS = 'http://www.w3.org/2000/svg';
+  const anchorStatusCache = new Map();
+  const fold = (value) => collapse(value).toLowerCase().slice(0, 240);
+  function anchorMatch(anchor, el) {
+    if (!anchor || !el) return 0;
+    const candidateRole = el.getAttribute('role') || ({ A:'link', BUTTON:'button', IMG:'img', INPUT:el.type==='checkbox'?'checkbox':'textbox', SELECT:'combobox', TEXTAREA:'textbox' }[el.tagName] ?? null);
+    const accessibleName = fold(el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder') || el.textContent);
+    const text = fold(el.textContent);
+    const weights = [[anchor.role && candidateRole === anchor.role,.14],[anchor.tag && el.tagName.toLowerCase() === String(anchor.tag).toLowerCase(),.08],[anchor.accessibleName && fold(anchor.accessibleName) === accessibleName,.42],[anchor.text && fold(anchor.text) === text,.2],[anchor.component?.name && Object.keys(el).some((key)=>key.startsWith('__reactFiber$')&&String(el[key]?.type?.name||'').includes(anchor.component.name)),.12],[anchor.attributes?.['data-testid'] && el.getAttribute('data-testid') === anchor.attributes['data-testid'],.16]];
+    return Math.min(1,weights.reduce((sum,[match,weight])=>sum+(match?weight:0),0));
+  }
+  function locateCommentTarget(comment, record) {
+    const anchor = comment.originalAnchor ?? record?.anchor ?? record;
+    if (!anchor) return { status: 'missing', element: null, candidates: [] };
+    if (anchor.route && canonicalRoute(anchor.route) !== canonicalRoute(realPage())) return { status: 'missing', element: null, candidates: [] };
+    let current = null;
+    try { if (record?.selector) current = document.querySelector(record.selector); } catch {}
+    if (current) {
+      const score = anchorMatch(anchor, current);
+      if (score >= .72 || (!anchor.accessibleName && !anchor.text && !anchor.role)) return { status: 'located', element: current, candidates: [] };
+    }
+    const nodes = [...document.querySelectorAll('a,button,input,select,textarea,[role],[data-testid],[data-test],h1,h2,h3,p,section,main')].slice(0, 900);
+    const ranked = nodes.map((element) => ({ element, score: anchorMatch(anchor, element) })).filter((entry) => entry.score >= .72).sort((a,b)=>b.score-a.score);
+    if (!ranked.length) return { status: 'missing', element: null, candidates: [] };
+    const candidates = ranked.slice(0,3).map(({element,score})=>({ ...describe(element), score }));
+    if (ranked[1] && ranked[0].score - ranked[1].score < .12) return { status: 'ambiguous', element: null, candidates };
+    return { status: 'recovered', element: ranked[0].element, candidates };
+  }
   const visualPage = () => `${location.origin}${location.pathname}${location.search}`;
   function renderVisuals() {
     const width = Math.max(document.documentElement.scrollWidth, innerWidth);
@@ -270,7 +368,7 @@
     const defs = document.createElementNS(svgNS, 'defs');
     const marker = document.createElementNS(svgNS, 'marker'); marker.id = 'uidit-arrowhead'; marker.setAttribute('markerWidth','10'); marker.setAttribute('markerHeight','8'); marker.setAttribute('refX','8'); marker.setAttribute('refY','4'); marker.setAttribute('orient','auto');
     const head = document.createElementNS(svgNS, 'path'); head.setAttribute('d','M0,0 L9,4 L0,8 Z'); head.setAttribute('fill','#785bff'); marker.append(head); defs.append(marker); svg.append(defs);
-    const matchesPage = (c) => !c.page || (() => { try { const a = new URL(c.page), current = new URL(realPage()); return a.origin === current.origin && a.pathname === current.pathname; } catch { return true; } })();
+    const matchesPage = (c) => !c.page || canonicalRoute(c.page) === canonicalRoute(realPage());
     const elements = new Map(visualState.elements.map((e) => [e.id, e]));
     const visibleComments = visualState.comments.filter((c) => !c.resolved && matchesPage(c));
     for (const c of visibleComments) {
@@ -285,13 +383,14 @@
     }
     visuals.append(svg);
     visibleComments.filter((c) => !c.drawing).forEach((c, index) => {
-      const record = elements.get(c.elementId); let el = null;
-      try { if (record?.selector) el = document.querySelector(record.selector); } catch {}
-      const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
+      const record = elements.get(c.elementId); const located = c.elementId ? locateCommentTarget(c, record) : { status: 'missing', element: null, candidates: [] }; const el = located.element;
+      const signature = `${located.status}:${located.candidates.map((candidate)=>candidate.selector).join('|')}`;
+      if (c.elementId && anchorStatusCache.get(c.id) !== signature) { anchorStatusCache.set(c.id, signature); post('anchor-status', { commentId: c.id, status: located.status, candidates: located.candidates }); }
+      const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.setAttribute('data-uidit-ui','1'); markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
       markerNode.style.cssText='position:absolute;pointer-events:auto;left:0;top:0;transform:translate(-50%,-50%);width:27px;height:27px;border:2px solid white;border-radius:50%;background:#785bff;color:white;font:700 12px system-ui;box-shadow:0 3px 14px #17132270;cursor:pointer;';
       const rect=el?.getBoundingClientRect(); const hasAnchor=Number.isFinite(c.anchor?.x)&&Number.isFinite(c.anchor?.y); const x=rect?rect.left+scrollX+rect.width/2:hasAnchor?c.anchor.x*width:width-34; const y=rect?rect.top+scrollY:hasAnchor?c.anchor.y*height:24+index*34;
       markerNode.style.left=`${x}px`; markerNode.style.top=`${y}px`;
-      const pop=document.createElement('section');pop.className='uidit-comment-thread';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Comment thread');pop.hidden=true;pop.setAttribute('data-uidit-ui','1');
+      const pop=document.createElement('section');pop.className='uidit-comment-thread';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Comment thread');pop.hidden=c.id!==openCommentId;pop.setAttribute('data-uidit-ui','1');
       pop.style.cssText='position:absolute;z-index:1;left:0;top:0;transform:translate(18px,14px);width:min(300px,calc(100vw - 32px));max-height:min(360px,calc(100vh - 48px));overflow:auto;padding:12px;border:1px solid #3d3a4b;border-radius:11px;background:#211f2b;color:#f5f4fa;font:12px/1.45 system-ui;box-shadow:0 10px 32px #17132255;pointer-events:auto;';
       pop.style.left=`${x}px`; pop.style.top=`${y}px`;
       const head=document.createElement('div');head.textContent=`Comment ${index+1}`;head.style.cssText='font-weight:700;font-size:11px;color:#c9c4dc;margin-bottom:6px;';
@@ -301,9 +400,9 @@
       const input=document.createElement('textarea');input.maxLength=4000;input.setAttribute('aria-label','Reply to comment');input.placeholder='Reply or ask the agent a question';input.style.cssText='display:block;box-sizing:border-box;width:100%;min-height:58px;resize:vertical;padding:8px;border:1px solid #4c4959;border-radius:7px;background:#17161f;color:#fff;font:12px/1.45 system-ui;';
       const send=document.createElement('button');send.type='button';send.textContent='Reply';send.disabled=true;send.style.cssText='display:block;margin:7px 0 0 auto;padding:6px 10px;border:0;border-radius:6px;background:#a99af5;color:#171522;font:600 11px system-ui;cursor:pointer;';
       input.addEventListener('input',()=>{send.disabled=!input.value.trim();});
-      send.addEventListener('click',async()=>{if(!input.value.trim())return;send.disabled=true;send.textContent='Sending…';try{await api('/comment-reply','POST',{commentId:c.id,text:input.value.trim()});input.value='';pop.hidden=true;renderVisuals();}catch(err){send.disabled=false;send.textContent='Retry';post('error',{message:err.message});}});
+      send.addEventListener('click',async()=>{if(!input.value.trim())return;send.disabled=true;send.textContent='Sending…';try{await api('/comment-reply','POST',{commentId:c.id,text:input.value.trim()});input.value='';openCommentId=null;renderVisuals();}catch(err){send.disabled=false;send.textContent='Retry';post('error',{message:err.message});}});
       pop.append(head,original,replies,input,send);visuals.append(pop);
-      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();const wasOpen=!pop.hidden;visuals.querySelectorAll('.uidit-comment-thread').forEach((thread)=>thread.hidden=true);pop.hidden=wasOpen;if(el){restoreSelected();state.selected={el,record};el.setAttribute('data-uidit-selected','1');el.scrollIntoView({block:'center',behavior:'smooth'});}});
+      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();openCommentId=openCommentId===c.id?null:c.id;visuals.querySelectorAll('.uidit-comment-thread').forEach((thread)=>thread.hidden=true);pop.hidden=openCommentId!==c.id;if(el){restoreSelected();state.selected={el,record:describe(el)};el.setAttribute('data-uidit-selected','1');}});
       visuals.append(markerNode);
     });
   }
@@ -322,7 +421,7 @@
     drawSvg.addEventListener('pointerup',async e=>{if(!drawStart||!drawShape)return;const start=drawStart;const end={x:e.clientX,y:e.clientY};drawStart=null;const pageWidth=Math.max(document.documentElement.scrollWidth,innerWidth),pageHeight=Math.max(document.documentElement.scrollHeight,innerHeight);const points=tool==='freehand'?parsePath(drawShape.getAttribute('d')).slice(0,500).map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight})):[start,end].map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight}));drawSvg.remove();drawSvg=null;document.documentElement.style.cursor='';drawingTool='off';try{await api('/comment','POST',{text:`${tool[0].toUpperCase()+tool.slice(1)} annotation for the coding agent`,elementId:null,page:realPage(),drawing:{type:tool,points,pageWidth,pageHeight}});post('drawn',{tool})}catch(err){post('error',{message:err.message})}});
   }
   function parsePath(d){return [...(d||'').matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map(m=>({x:Number(m[1]),y:Number(m[2])}));}
-  addEventListener('resize',renderVisuals); addEventListener('scroll',renderVisuals,true);
+  addEventListener('resize',renderVisuals); addEventListener('scroll',()=>{ if (!document.activeElement?.closest?.('.uidit-comment-thread')) renderVisuals(); },true);
 
   // Highlight via attribute, never inline styles: the element's own style attribute
   // must stay pristine so recorded `before` values are the real page values.
@@ -447,6 +546,7 @@
   async function applyStyle(prop, value) {
     const el = state.selected?.el;
     if (!el) return;
+    if (typeof prop !== 'string' || prop.length > 100 || !/^(?:--[\w-]+|[a-z-]+)$/.test(prop) || (value !== null && (typeof value !== 'string' || value.length > 500 || (prop.startsWith('--') ? /[<>]/.test(value) : !CSS.supports(prop, value))))) { post('error', { message: 'That CSS value is invalid or unsupported' }); return; }
     const before = el.style.getPropertyValue(prop);
     if (!state.pendingStyle) state.pendingStyle = { el, props: {} };
     if (!Object.hasOwn(state.pendingStyle.props, prop)) state.pendingStyle.props[prop] = before;
@@ -588,12 +688,37 @@
       return;
     }
     if (msg.type === 'state') {
+      setBrowserInspection(msg.browserInspection === true);
       if (!savedAnchor) setAnchor(msg.position === 'bottom-right' ? 'right-bottom' : 'left-bottom');
       if (Array.isArray(msg.comments) && Array.isArray(msg.elements)) { visualState = { comments: msg.comments, elements: msg.elements }; renderVisuals(); }
       // Keep the bridge's trusted discriminator after spreading dashboard
       // state, which carries its own `source` field.
       controls.contentWindow?.postMessage({ ...msg, source: 'uidit-preview', type: 'state' }, controlOrigin); return;
     }
+    if (msg.type === 'browserAction') { runBrowserAction(msg.id, msg.action); return; }
+    if (msg.type === 'componentStatePreview') {
+      if (msg.state === 'reset') { componentStateRestore?.(); componentStateRestore = null; post('component-state', { state: 'reset', ok: true }); return; }
+      const el = state.selected?.el;
+      if (!el) { post('component-state', { state: msg.state, ok: false, error: 'Select an element first' }); return; }
+      componentStateRestore?.(); componentStateRestore = null;
+      if (msg.state === 'focus') {
+        const previous = document.activeElement;
+        const oldTabindex = el.getAttribute('tabindex');
+        if (!el.matches('a[href],button,input,select,textarea,[tabindex]')) el.setAttribute('tabindex', '-1');
+        el.focus?.({ preventScroll: true });
+        componentStateRestore = () => { if (document.activeElement === el) el.blur?.(); if (oldTabindex === null) el.removeAttribute('tabindex'); else el.setAttribute('tabindex', oldTabindex); if (previous && previous !== document.body && previous.isConnected) previous.focus?.({ preventScroll: true }); };
+        post('component-state', { state: 'focus', ok: true, label: 'Browser focus state; app state unchanged' }); return;
+      }
+      if (msg.state === 'disabled') {
+        if (!('disabled' in el)) { post('component-state', { state: 'disabled', ok: false, error: 'This element does not support the disabled state' }); return; }
+        const wasDisabled = el.disabled; el.disabled = true;
+        componentStateRestore = () => { if (el.isConnected) el.disabled = wasDisabled; };
+        post('component-state', { state: 'disabled', ok: true, label: 'Temporary DOM state; reload or Reset restores it' }); return;
+      }
+      post('component-state', { state: msg.state, ok: false, error: 'This state needs an application fixture and is not available through generic DOM preview' });
+      return;
+    }
+    if (msg.type === 'browserControlRevoke') { setBrowserInspection(false); return; }
     if (msg.type === 'theme' && ['light', 'dark'].includes(msg.theme)) {
       controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'theme', theme: msg.theme }, controlOrigin); return;
     }
@@ -650,6 +775,33 @@
     }
 
     if (msg.type === 'style') applyStyle(msg.property, msg.value);
+
+    if (msg.type === 'proposalPreview') {
+      const el = state.selected?.el;
+      if (!el || !Array.isArray(msg.changes) || msg.changes.length < 1 || msg.changes.length > 12 || !['style', 'text', 'class', 'attribute'].includes(msg.operation)) { post('error', { message: 'Select the proposal target before previewing it' }); return; }
+      proposalRestore?.();
+      const originalText = el.textContent;
+      const originalClass = el.getAttribute('class');
+      const before = msg.changes.map(({ property }) => ({ property, value: msg.operation === 'style' ? el.style.getPropertyValue(property) : msg.operation === 'attribute' ? el.getAttribute(property) : null }));
+      const safeStyles = new Set(['color','background-color','padding','margin','gap','border','border-radius','box-shadow','font-size','font-weight','line-height','letter-spacing','text-align','width','max-width','min-height','display','align-items','justify-content']);
+      const safeAttributes = new Set(['aria-label','title','alt','role']);
+      try {
+        for (const change of msg.changes) {
+          if (msg.operation === 'style') { if (!safeStyles.has(change.property) || typeof change.value !== 'string' || !CSS.supports(change.property, change.value)) throw new Error(`Unsupported style proposal: ${change.property}`); el.style.setProperty(change.property, change.value); }
+          else if (msg.operation === 'text') { if (typeof change.value !== 'string' || change.value.length > 500) throw new Error('Invalid text proposal'); el.textContent = change.value; }
+          else if (msg.operation === 'class') { if (typeof change.value !== 'string' || !/^[\w-]{1,80}$/.test(change.value)) throw new Error('Invalid class proposal'); el.classList.add(change.value); }
+          else { if (!safeAttributes.has(change.property) || typeof change.value !== 'string' || change.value.length > 200) throw new Error(`Unsupported attribute proposal: ${change.property}`); el.setAttribute(change.property, change.value); }
+        }
+      } catch (error) {
+        for (const prior of before) if (msg.operation === 'style') { if (prior.value) el.style.setProperty(prior.property, prior.value); else el.style.removeProperty(prior.property); } else if (msg.operation === 'attribute') { if (prior.value === null) el.removeAttribute(prior.property); else el.setAttribute(prior.property, prior.value); }
+        if (msg.operation === 'text') el.textContent = originalText;
+        if (msg.operation === 'class') { if (originalClass === null) el.removeAttribute('class'); else el.setAttribute('class', originalClass); }
+        post('error', { message: error.message }); return;
+      }
+      proposalRestore = () => { if (!el.isConnected) return; if (msg.operation === 'style') for (const prior of before) { if (prior.value) el.style.setProperty(prior.property, prior.value); else el.style.removeProperty(prior.property); } else if (msg.operation === 'text') el.textContent = originalText; else if (msg.operation === 'class') { if (originalClass === null) el.removeAttribute('class'); else el.setAttribute('class', originalClass); } else for (const prior of before) { if (prior.value === null) el.removeAttribute(prior.property); else el.setAttribute(prior.property, prior.value); } };
+      post('proposal-preview', { ok: true, operation: msg.operation });
+    }
+    if (msg.type === 'proposalReset') { proposalRestore?.(); proposalRestore = null; post('proposal-preview', { ok: true, reset: true }); }
 
     if (msg.type === 'commitText') {
       const el = state.selected?.el;
@@ -717,6 +869,7 @@
     }
 
     if (msg.type === 'revert') {
+      proposalRestore?.(); proposalRestore = null;
       restoreSelected();
       post('selected', { element: null });
     }

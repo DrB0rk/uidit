@@ -13,17 +13,20 @@ const MORE_TABS = TABS.slice(4);
 const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
 
 export default function Dashboard() {
-  const { config, session, status: live, dev, mcp, collaboration, selection, actions } = useSession();
+  const { config, session, status: live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
   const frameRef = useRef(null);
   const replayWaiters = useRef(new Map());
   const [mode, setMode] = useState('off');
   const [selected, setSelected] = useState(null);
+  const [anchorStatuses, setAnchorStatuses] = useState({});
   const [status, setStatus] = useState({ text: 'ready', kind: '' });
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [tab, setTab] = useState('feedback');
   const [reloadKey, setReloadKey] = useState(0);
   const [replayState, setReplayState] = useState(null);
   const [device, setDevice] = useState(() => { try { return ['desktop', 'tablet', 'phone'].includes(localStorage.getItem('uidit-device')) ? localStorage.getItem('uidit-device') : 'desktop'; } catch { return 'desktop'; } });
+  const [viewportLayout, setViewportLayout] = useState(1);
+  const [customViewport, setCustomViewport] = useState({ width: 390, height: 844 });
   const [reference, setReference] = useState(null);
   const [compareMode, setCompareMode] = useState('overlay');
   const [referenceOpacity, setReferenceOpacity] = useState(50);
@@ -59,8 +62,8 @@ export default function Dashboard() {
 
   const syncOverlay = useCallback(() => {
     toOverlay({ type: 'mode', mode });
-    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements, theme });
-  }, [mode, session, dev, mcp.clientCount, config?.ui?.position, theme, toOverlay]);
+    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, browserInspection: config?.ui?.allowBrowserInspection === true, comments: session.comments, elements: session.elements, theme });
+  }, [mode, session, dev, mcp.clientCount, config?.ui?.position, config?.ui?.allowBrowserInspection, theme, toOverlay]);
 
   const onStatus = useCallback((text, kind = '') => setStatus({ text, kind }), []);
 
@@ -132,6 +135,16 @@ export default function Dashboard() {
         syncOverlay();
       }
       if (msg.type === 'selected') setSelected(msg.element ?? null);
+      if (msg.type === 'browser-context') actions.browserContext(msg).catch((error) => onStatus(error.message, 'error'));
+      if (msg.type === 'browser-diagnostics' && Array.isArray(msg.entries)) actions.browserDiagnostics(msg.entries).catch((error) => onStatus(error.message, 'error'));
+      if (msg.type === 'browser-action-result' && typeof msg.id === 'string') actions.browserActionResult(msg.id, { ok: msg.ok === true, error: msg.error, result: msg.result }).catch((error) => onStatus(error.message, 'error'));
+      if (msg.type === 'component-state' && typeof msg.state === 'string') onStatus(msg.ok ? `${msg.state} state previewed${msg.label ? ` · ${msg.label}` : ''}` : msg.error ?? 'Component state preview is unavailable', msg.ok ? 'ok' : 'error');
+      if (msg.type === 'proposal-preview') onStatus('Proposal changes are previewed in the page', 'ok');
+      if (msg.type === 'anchor-status' && typeof msg.commentId === 'string' && ['located', 'recovered', 'ambiguous', 'missing'].includes(msg.status)) setAnchorStatuses((current) => ({ ...current, [msg.commentId]: msg }));
+      if (msg.type === 'reattach-comment' && typeof msg.commentId === 'string' && msg.element && typeof msg.element.selector === 'string') {
+        try { const { element } = await actions.element(msg.element); await actions.reattachComment(msg.commentId, element.id); onStatus('Comment reattached to the selected page element', 'ok'); }
+        catch (error) { onStatus(error.message, 'error'); }
+      }
       if (msg.type === 'error') onStatus(msg.message, 'error');
       if (msg.type === 'control') {
         if (msg.action === 'inspect' && typeof msg.enabled === 'boolean') { setMode(msg.enabled ? 'inspect' : 'off'); toOverlay({ type: 'mode', mode: msg.enabled ? 'inspect' : 'off' }); }
@@ -155,6 +168,12 @@ export default function Dashboard() {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [actions, bridgeApi, onStatus, previewOrigin, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
+
+  useEffect(() => {
+    if (!browserAction?.id) return;
+    setStatus({ text: `Agent ${browserAction.action?.type ?? 'browser'} action running`, kind: 'ok' });
+    toOverlay({ type: 'browserAction', id: browserAction.id, action: browserAction.action });
+  }, [browserAction, toOverlay]);
 
   const recordingFlowId = session.flows?.find((flow) => flow.status === 'recording')?.id ?? null;
   useEffect(() => {
@@ -220,14 +239,23 @@ export default function Dashboard() {
 
   return <main className={`immersive${workspaceOpen ? ' workspace-open' : ''}`}>
     {targetUrl ? <>
-      <div className={`preview-device-stage device-${device}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100 }}>
-        <div className="preview-live-frame">
-          <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title={`${device} live application preview`} src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={syncOverlay} />
-          {reference && compareMode === 'overlay' && <img className="preview-reference-overlay" src={reference.dataUrl} alt="Reference design overlay" />}
-        </div>
-        {reference && compareMode === 'side' && <div className="preview-reference-side"><span>Reference</span><img src={reference.dataUrl} alt={`Reference: ${reference.name}`} /></div>}
+      <div className={`preview-device-stage device-${device}${viewportLayout > 1 ? ' multi-viewport' : ''}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100, '--custom-width': `${customViewport.width}px`, '--custom-height': `${customViewport.height}px` }}>
+        {Array.from({ length: viewportLayout }, (_, index) => {
+          const viewportDevice = viewportLayout === 1 ? device : ['phone', 'tablet', 'desktop'][index];
+          return <div className={`preview-live-frame device-${viewportDevice}`} key={index}>
+            {viewportLayout > 1 && <span className="viewport-label">{viewportDevice === 'phone' ? 'Phone · 390 × 844' : viewportDevice === 'tablet' ? 'Tablet · 768 × 1024' : 'Desktop · 1280 × 800'}</span>}
+            <iframe key={reloadKey} ref={index === 0 ? frameRef : undefined} className="immersive-preview" title={`${viewportDevice} live application preview`} src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={index === 0 ? syncOverlay : undefined} />
+            {index === 0 && reference && compareMode === 'overlay' && <img className="preview-reference-overlay" src={reference.dataUrl} alt="Reference design overlay" />}
+          </div>;
+        })}
+        {reference && compareMode === 'side' && viewportLayout === 1 && <div className="preview-reference-side"><span>Reference</span><img src={reference.dataUrl} alt={`Reference: ${reference.name}`} /></div>}
       </div>
-      {workspaceOpen && <div className="device-toolbar" role="group" aria-label="Preview device size">{[['desktop', 'Desktop', Laptop], ['tablet', 'Tablet', Tablet], ['phone', 'Phone', Smartphone]].map(([key, label, Icon]) => <button type="button" key={key} aria-pressed={device === key} className={device === key ? 'active' : ''} onClick={() => setDevice(key)}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}</div>}
+      {workspaceOpen && <div className="device-toolbar" role="group" aria-label="Preview device size">
+        {[['desktop', 'Desktop', Laptop], ['tablet', 'Tablet', Tablet], ['phone', 'Phone', Smartphone]].map(([key, label, Icon]) => <button type="button" key={key} aria-pressed={device === key} className={device === key ? 'active' : ''} onClick={() => { setDevice(key); setViewportLayout(1); }}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}
+        <span className="toolbar-separator" />
+        {[1, 2, 3].map((count) => <button type="button" key={count} aria-pressed={viewportLayout === count} className={viewportLayout === count ? 'active' : ''} onClick={() => setViewportLayout(count)}>{count} view{count > 1 ? 's' : ''}</button>)}
+        <label className="custom-viewport">Custom <input aria-label="Custom viewport width" type="number" min="240" max="2560" value={customViewport.width} onChange={(event) => setCustomViewport((value) => ({ ...value, width: Math.max(240, Math.min(2560, Number(event.target.value) || 240)) }))} /> × <input aria-label="Custom viewport height" type="number" min="320" max="1800" value={customViewport.height} onChange={(event) => setCustomViewport((value) => ({ ...value, height: Math.max(320, Math.min(1800, Number(event.target.value) || 320)) }))} /><button type="button" className="btn sm" onClick={() => { setDevice('custom'); setViewportLayout(1); }}>Apply</button></label>
+      </div>}
     </> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
     {workspaceOpen && <section className="workspace-drawer" aria-label="UIDIT review workspace">
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><details className="workspace-more"><summary className={MORE_TABS.some(([id]) => tab === id) ? 'active' : ''} aria-label="More workspace sections" title="More workspace sections"><Ellipsis size={17} aria-hidden="true"/><span>More</span></summary><div className="workspace-more-menu">{MORE_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={(event) => { setTab(id); event.currentTarget.closest('details').open = false; }}><Icon size={15} aria-hidden="true"/><span>{label}</span></button>)}</div></details><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
@@ -235,11 +263,11 @@ export default function Dashboard() {
       <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
       <nav className="workspace-tabs" aria-label="Review workspace sections">{PRIMARY_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
-        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
+        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
         {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
         {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
-        {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} />}
-        {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} actions={actions} onStatus={onStatus} />}
+        {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} browserContext={browserContext} browserDiagnostics={browserDiagnostics} />}
+        {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
         {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
       </div>
       <footer className="workspace-foot"><span className="status-dot online" /> Local · {live}</footer>
