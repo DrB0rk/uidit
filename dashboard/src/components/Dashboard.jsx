@@ -146,7 +146,7 @@ export default function Dashboard() {
       <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
       <div className="workspace-tabs" role="tablist" aria-label="Review workspace sections">{TABS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</div>
       <div className="workspace-content">
-        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} tab={tab} showTabs={false} />}
+        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} tab={tab} showTabs={false} />}
         {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} />}
         {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} actions={actions} onStatus={onStatus} />}
         {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}

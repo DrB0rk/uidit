@@ -3,7 +3,7 @@ import {
   Check, X, Copy, MousePointerClick, Trash2, RotateCcw, ClipboardCopy, Square,
 } from 'lucide-react';
 
-const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : '');
+const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
 
 function SelectionBox({ selected, onComment, onOverlay, busy }) {
   const [text, setText] = useState('');
@@ -16,11 +16,12 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
 
   if (!selected) {
     return (
-      <div className="empty-state">
-        Click an element in the preview to tag it.
-        <br />
-        Pick <kbd>Inspect</kbd> to select, or <kbd>Text</kbd> to edit copy in place.
-      </div>
+      <section className="selection selection-empty" aria-label="Add page feedback">
+        <div className="selection-intro"><strong>Leave page feedback</strong><span>Select an element to attach a note, or add a general page note.</span></div>
+        <label className="sr-only" htmlFor={`${id}-comment`}>Add a note about this page</label>
+        <textarea id={`${id}-comment`} data-testid="comment" className="comment" rows={2} value={text} placeholder="What should change on this page?" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) { e.preventDefault(); onComment(text.trim()).then(() => setText('')); } }} />
+        <div className="row selection-actions"><span className="muted hint">Page-level note</span><button type="button" className="btn primary sm" disabled={!text.trim() || busy} onClick={async () => { await onComment(text.trim()); setText(''); }}>Add note</button></div>
+      </section>
     );
   }
 
@@ -215,6 +216,7 @@ function CommentItem({ comment, element, onToggle, onUpdate, onSelect }) {
         </span>
       </div>
       {editing ? <div className="edit-comment"><textarea aria-label="Edit comment" value={text} onChange={(ev) => setText(ev.target.value)} /><button className="btn sm primary" disabled={!text.trim()} onClick={async () => { await onUpdate(comment, text.trim()); setEditing(false); }}>Save note</button></div> : <div className="item-text">{comment.text}</div>}
+      {comment.drawing && <div className="annotation-chip"><span aria-hidden="true">{comment.drawing.type === 'arrow' ? '↗' : comment.drawing.type === 'rectangle' ? '▱' : comment.drawing.type === 'ellipse' ? '◯' : '〰'}</span>{comment.drawing.type} annotation</div>}
       <div className="item-meta">
         <span>{fmt(comment.createdAt)}</span>
         {comment.page && <span>{comment.page.replace(/^https?:\/\//, '')}</span>}
@@ -313,7 +315,7 @@ const TABS = [
   ['changes', 'Changes'],
 ];
 
-export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, tab: controlledTab, onTab, showTabs = true }) {
+export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, page, tab: controlledTab, onTab, showTabs = true }) {
   const [localTab, setLocalTab] = useState('feedback');
   const tab = controlledTab ?? localTab;
   const setTab = onTab ?? setLocalTab;
@@ -334,7 +336,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
   };
 
   const comment = run(async (text) => {
-    await actions.comment({ elementId: selectedId ?? null, text, page: selected?.page ?? null });
+    await actions.comment({ elementId: selectedId ?? null, text, page: selected?.page ?? page ?? null });
   }, 'Comment saved to .uidit');
 
   const toggleComment = run((c) => actions.patch('comments', c.id, { resolved: !c.resolved }));
@@ -352,7 +354,8 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
   const openCount = session.comments.filter((c) => !c.resolved).length;
   const pendingEdits = session.edits.filter((e) => !e.applied).length;
-  const counts = { feedback: openCount, elements: session.elements.length, edits: pendingEdits };
+  const counts = { feedback: openCount, inspect: session.elements.length, changes: pendingEdits };
+  const filteredComments = [...session.comments].filter((c) => filter === 'all' || (filter === 'resolved' ? c.resolved : !c.resolved)).filter((c) => !query || [c.text, c.page, session.elements.find((element) => element.id === c.elementId)?.selector].filter(Boolean).join(' ').toLowerCase().includes(query.toLowerCase())).reverse();
 
   const copyFeedback = async () => {
     try {
@@ -386,16 +389,17 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       </div>}
 
       {tab === 'feedback' && (
-        <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby="tab-feedback">
+        <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby={showTabs ? 'tab-feedback' : undefined}>
           <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} />
-          <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open</option><option value="all">All history</option><option value="resolved">Resolved</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search feedback" aria-label="Search feedback" /></div>
+          <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open · {openCount}</option><option value="all">All · {session.comments.length}</option><option value="resolved">Resolved · {session.comments.length - openCount}</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes, pages, selectors" aria-label="Search notes, pages, and selectors" /></div>
           <ul className="list">
             {session.comments.length === 0 && (
               <li className="empty-state">
-                Nothing tagged yet. Click an element in the preview, then leave a comment.
+                No feedback yet. Add a page note above or select an element in the preview to leave a focused note.
               </li>
             )}
-            {[...session.comments].filter((c) => filter === 'all' || (filter === 'resolved' ? c.resolved : !c.resolved)).filter((c) => !query || c.text.toLowerCase().includes(query.toLowerCase())).reverse().map((c) => (
+            {session.comments.length > 0 && filteredComments.length === 0 && <li className="empty-state filter-empty">No notes match these filters.<button type="button" className="btn sm ghost" onClick={() => { setFilter('all'); setQuery(''); }}>Clear filters</button></li>}
+            {filteredComments.map((c) => (
               <CommentItem
                 key={c.id}
                 comment={c}
@@ -410,7 +414,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       )}
 
       {tab === 'inspect' && (
-        <div className="panel" role="tabpanel" id="panel-elements" aria-labelledby="tab-elements">
+        <div className="panel" role="tabpanel" id="panel-inspect" aria-labelledby={showTabs ? 'tab-inspect' : undefined}>
           <ul className="list">
             {session.elements.length === 0 && (
               <li className="empty-state">Click an element in the preview to tag it.</li>
@@ -430,7 +434,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       )}
 
       {tab === 'changes' && (
-        <div className="panel" role="tabpanel" id="panel-edits" aria-labelledby="tab-edits">
+        <div className="panel" role="tabpanel" id="panel-changes" aria-labelledby={showTabs ? 'tab-changes' : undefined}>
           <ul className="list">
             {session.edits.length === 0 && (
               <li className="empty-state">
