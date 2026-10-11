@@ -11,7 +11,7 @@ iframe[data-uidit-ui] {
 
 iframe[data-uidit-ui].uidit-open {
   width: 320px;
-  height: 500px;
+  height: min(660px, calc(100vh - 24px));
 }
 
 iframe[data-uidit-ui].uidit-left {
