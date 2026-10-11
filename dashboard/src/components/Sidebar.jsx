@@ -390,6 +390,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
       {tab === 'feedback' && (
         <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby={showTabs ? 'tab-feedback' : undefined}>
+          <div className="panel-heading"><h2>Feedback</h2><span>{openCount} open</span></div>
           <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} />
           <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open · {openCount}</option><option value="all">All · {session.comments.length}</option><option value="resolved">Resolved · {session.comments.length - openCount}</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes, pages, selectors" aria-label="Search notes, pages, and selectors" /></div>
           <ul className="list">
@@ -415,6 +416,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
       {tab === 'inspect' && (
         <div className="panel" role="tabpanel" id="panel-inspect" aria-labelledby={showTabs ? 'tab-inspect' : undefined}>
+          <div className="panel-heading"><h2>Tagged elements</h2><span>{session.elements.length}</span></div>
           <ul className="list">
             {session.elements.length === 0 && (
               <li className="empty-state">Click an element in the preview to tag it.</li>
@@ -435,6 +437,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
       {tab === 'changes' && (
         <div className="panel" role="tabpanel" id="panel-changes" aria-labelledby={showTabs ? 'tab-changes' : undefined}>
+          <div className="panel-heading"><h2>Preview changes</h2><span>{session.edits.filter((edit) => !edit.applied).length} pending</span></div>
           <ul className="list">
             {session.edits.length === 0 && (
               <li className="empty-state">

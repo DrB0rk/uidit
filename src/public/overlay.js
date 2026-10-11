@@ -222,13 +222,93 @@
     state.selected = { el, record: describe(el) };
     el.setAttribute('data-uidit-selected', '1');
     paint(el, true);
-    api('/element', 'POST', state.selected.record)
+    return api('/element', 'POST', state.selected.record)
       .then(({ element }) => {
-        state.selected.record = element;
+        if (state.selected?.el === el) state.selected.record = element;
         post('selected', { element });
+        return element;
       })
       .catch((err) => post('error', { message: err.message }));
   }
+
+  const contextMenu = document.createElement('div');
+  contextMenu.id = 'uidit-context-menu';
+  contextMenu.className = 'uidit-context-menu';
+  contextMenu.setAttribute('data-uidit-ui', '1');
+  contextMenu.setAttribute('role', 'menu');
+  contextMenu.setAttribute('aria-label', 'Page review actions');
+  contextMenu.hidden = true;
+  document.documentElement.append(contextMenu);
+  let contextTarget = null;
+  let contextElementId = null;
+  function closeContextMenu() {
+    contextMenu.hidden = true;
+    if (contextTarget && contextTarget !== state.selected?.el) paint(contextTarget, false);
+    contextTarget = null;
+  }
+  function openContextMenu(ev) {
+    if (ev.target.closest?.('[data-uidit-ui]')) return;
+    ev.preventDefault();
+    contextTarget = ev.target.nodeType === 1 ? ev.target : ev.target.parentElement;
+    contextElementId = null;
+    if (contextTarget && contextTarget !== document.body && contextTarget !== document.documentElement) paint(contextTarget, true);
+    const pageTarget = !contextTarget || contextTarget === document.body || contextTarget === document.documentElement;
+    contextMenu.setAttribute('role', 'menu');
+    contextMenu.innerHTML = `<div class="uidit-context-title">UIDIT <span>${pageTarget ? 'Page actions' : 'Element actions'}</span></div>
+      <button type="button" role="menuitem" data-context-action="comment">${pageTarget ? 'Add page note' : 'Comment on this element'}</button>
+      ${pageTarget ? '' : '<button type="button" role="menuitem" data-context-action="inspect">Inspect this element</button><button type="button" role="menuitem" data-context-action="edit">Quick edit text</button>'}
+      <div class="uidit-context-divider"></div><div class="uidit-context-label">Draw on page</div>
+      <button type="button" role="menuitem" data-context-action="draw-arrow">Draw an arrow</button>
+      <button type="button" role="menuitem" data-context-action="draw-rectangle">Draw a rectangle</button>
+      <div class="uidit-context-divider"></div><button type="button" role="menuitem" data-context-action="copy">${pageTarget ? 'Copy page URL' : 'Copy selector'}</button>`;
+    contextMenu.hidden = false;
+    contextMenu.style.left = `${Math.max(8, Math.min(ev.clientX, innerWidth - 250))}px`;
+    contextMenu.style.top = `${Math.max(8, Math.min(ev.clientY, innerHeight - 360))}px`;
+    requestAnimationFrame(() => {
+      const rect = contextMenu.getBoundingClientRect();
+      contextMenu.style.left = `${Math.max(8, Math.min(ev.clientX, innerWidth - rect.width - 8))}px`;
+      contextMenu.style.top = `${Math.max(8, Math.min(ev.clientY, innerHeight - rect.height - 8))}px`;
+    });
+  }
+  contextMenu.addEventListener('click', async (ev) => {
+    const button = ev.target.closest('[data-context-action]');
+    if (!button) return;
+    const action = button.dataset.contextAction;
+    try {
+      if (action === 'comment') {
+        const target = contextTarget && contextTarget !== document.body && contextTarget !== document.documentElement ? contextTarget : null;
+        if (target) { const element = await select(target); contextElementId = element?.id ?? null; }
+        else { restoreSelected(); post('selected', { element: null }); }
+        const pageOnly = !target;
+        contextMenu.setAttribute('role', 'dialog');
+        contextMenu.setAttribute('aria-label', pageOnly ? 'Add a page note' : 'Comment on selected element');
+        contextMenu.innerHTML = `<div class="uidit-context-title">${pageOnly ? 'Page note' : 'Comment'} <span>${pageOnly ? 'Page-level' : 'Selected element'}</span></div><label class="uidit-context-sr" for="uidit-context-note">What should change?</label><textarea id="uidit-context-note" maxlength="4000" placeholder="What should change?"></textarea><div class="uidit-context-actions"><button type="button" data-context-action="cancel">Cancel</button><button type="button" class="primary" data-context-action="post" disabled>Post note</button></div>`;
+        const textarea = contextMenu.querySelector('textarea');
+        const submit = contextMenu.querySelector('[data-context-action="post"]');
+        textarea.addEventListener('input', () => { submit.disabled = !textarea.value.trim(); });
+        textarea.focus();
+        contextMenu.dataset.composer = '1';
+        return;
+      }
+      if (action === 'cancel') { delete contextMenu.dataset.composer; closeContextMenu(); return; }
+      if (action === 'post') {
+        const text = contextMenu.querySelector('textarea')?.value.trim();
+        if (!text) return;
+        await api('/comment', 'POST', { elementId: contextElementId, page: realPage(), text });
+        delete contextMenu.dataset.composer; closeContextMenu(); renderVisuals(); return;
+      }
+      const target = contextTarget;
+      if (action === 'inspect' && target && target !== document.body && target !== document.documentElement) await select(target);
+      if (action === 'edit' && target && target !== document.body && target !== document.documentElement) { await select(target); await handle({ type: 'mode', mode: 'text' }); }
+      if (action === 'copy') await navigator.clipboard.writeText(target && target !== document.body && target !== document.documentElement ? uniqueSelector(target) : realPage());
+      if (action === 'draw-arrow') setDrawingTool('arrow');
+      if (action === 'draw-rectangle') setDrawingTool('rectangle');
+      delete contextMenu.dataset.composer;
+      closeContextMenu();
+    } catch (err) { post('error', { message: err.message }); }
+  });
+  document.addEventListener('contextmenu', openContextMenu, true);
+  document.addEventListener('pointerdown', (ev) => { if (!contextMenu.hidden && !contextMenu.contains(ev.target)) closeContextMenu(); }, true);
 
   async function applyStyle(prop, value) {
     const el = state.selected?.el;
@@ -272,6 +352,7 @@
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') {
+      closeContextMenu();
       setDrawingTool('off');
       restoreSelected();
       post('selected', { element: null });

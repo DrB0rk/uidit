@@ -3,8 +3,9 @@ import Toolbar from './Toolbar.jsx';
 import Sidebar from './Sidebar.jsx';
 import { AgentsPanel, ServerPanel, SettingsPanel } from './RuntimePanels.jsx';
 import { useSession } from '../state/useSession.js';
+import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2 } from 'lucide-react';
 
-const TABS = [['feedback', 'Feedback'], ['inspect', 'Inspect'], ['changes', 'Changes'], ['server', 'Server'], ['agents', 'Agents'], ['settings', 'Settings']];
+const TABS = [['feedback', 'Feedback', MessageSquareText], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
 const PREVIEW_API = new Set(['/element', '/comment', '/edit']);
 
 export default function Dashboard() {
@@ -144,7 +145,7 @@ export default function Dashboard() {
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></header>
       {targetUrl && <Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
       <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
-      <div className="workspace-tabs" role="tablist" aria-label="Review workspace sections">{TABS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</div>
+      <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
         {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} tab={tab} showTabs={false} />}
         {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} />}
