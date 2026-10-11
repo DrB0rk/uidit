@@ -12,12 +12,24 @@
   "files": [
     "bin",
     "src",
-    "dashboard",
-    "README.md"
+    "dashboard/dist",
+    "dashboard/src",
+    "dashboard/astro.config.mjs",
+    "README.md",
+    "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DrB0rk/uidit.git"
+  },
+  "homepage": "https://github.com/DrB0rk/uidit#readme",
+  "bugs": {
+    "url": "https://github.com/DrB0rk/uidit/issues"
+  },
   "scripts": {
     "build:dashboard": "astro build --root dashboard",
     "dev:dashboard": "astro dev --root dashboard",
+    "prepare": "node bin/uidit.js build --if-needed",
     "start": "node bin/uidit.js start",
     "test": "node --test test/unit.test.js test/proxy.test.js && node test/e2e.js && node test/stacks.js"
   },

@@ -98,9 +98,11 @@ const commands = {
     console.log(`${c.accent('✓')} resolved ${targets.length} comment(s)`);
   },
 
-  async build(cwd) {
+  async build(cwd, argv) {
+    // npm's `prepare` hook runs this on install; a shipped build makes it a no-op.
+    if (argv.includes('--if-needed') && dashboardBuilt()) return;
     await buildDashboard();
-    console.log(`${c.accent('✓')} dashboard built`);
+    if (!argv.includes('--if-needed')) console.log(`${c.accent('✓')} dashboard built`);
   },
 };
 
