@@ -191,7 +191,9 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
   );
 }
 
-function CommentItem({ comment, element, onToggle, onDelete, onSelect }) {
+function CommentItem({ comment, element, onToggle, onUpdate, onSelect }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(comment.text);
   return (
     <li className={`item${comment.resolved ? ' resolved' : ''}`}>
       <div className="item-top">
@@ -203,17 +205,16 @@ function CommentItem({ comment, element, onToggle, onDelete, onSelect }) {
           {element?.selector ?? 'page-level note'}
         </button>
         <span className="item-actions">
+          <button type="button" className="btn sm ghost" onClick={() => { setText(comment.text); setEditing((x) => !x); }}>
+            <span>{editing ? 'Cancel edit' : 'Edit note'}</span>
+          </button>
           <button type="button" className="btn sm ghost" onClick={() => onToggle(comment)}>
             {comment.resolved ? <RotateCcw size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
             <span className="sr-only">{comment.resolved ? 'Reopen comment' : 'Resolve comment'}</span>
           </button>
-          <button type="button" className="btn sm ghost" onClick={() => onDelete(comment)}>
-            <X size={14} aria-hidden="true" />
-            <span className="sr-only">Delete comment</span>
-          </button>
         </span>
       </div>
-      <div className="item-text">{comment.text}</div>
+      {editing ? <div className="edit-comment"><textarea aria-label="Edit comment" value={text} onChange={(ev) => setText(ev.target.value)} /><button className="btn sm primary" disabled={!text.trim()} onClick={async () => { await onUpdate(comment, text.trim()); setEditing(false); }}>Save note</button></div> : <div className="item-text">{comment.text}</div>}
       <div className="item-meta">
         <span>{fmt(comment.createdAt)}</span>
         {comment.page && <span>{comment.page.replace(/^https?:\/\//, '')}</span>}
@@ -308,12 +309,14 @@ export function toMarkdown(session) {
 
 const TABS = [
   ['feedback', 'Feedback'],
-  ['elements', 'Elements'],
-  ['edits', 'Edits'],
+  ['inspect', 'Inspect'],
+  ['changes', 'Changes'],
 ];
 
-export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus }) {
-  const [tab, setTab] = useState('feedback');
+export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, tab: controlledTab, onTab, showTabs = true }) {
+  const [localTab, setLocalTab] = useState('feedback');
+  const tab = controlledTab ?? localTab;
+  const setTab = onTab ?? setLocalTab;
   const [busy, setBusy] = useState(false);
   const selected = session.elements.find((e) => e.id === selectedId) ?? null;
 
@@ -335,8 +338,17 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
   }, 'Comment saved to .uidit');
 
   const toggleComment = run((c) => actions.patch('comments', c.id, { resolved: !c.resolved }));
-  const toggleEdit = run((e) => actions.patch('edits', e.id, { applied: !e.applied }));
+  const toggleEdit = run(async (e) => {
+    if (e.applied) return actions.patch('edits', e.id, { applied: false, provenance: null, appliedAt: null });
+    const provenance = window.prompt('Describe the source change you made and verified:');
+    if (!provenance?.trim()) return;
+    return actions.patch('edits', e.id, { applied: true, appliedAt: new Date().toISOString(), provenance: provenance.trim() });
+  });
   const drop = run((collection, id) => actions.remove(collection, id), 'Removed');
+  const updateComment = run((comment, text) => actions.patch('comments', comment.id, { text }), 'Note updated');
+
+  const [filter, setFilter] = useState('open');
+  const [query, setQuery] = useState('');
 
   const openCount = session.comments.filter((c) => !c.resolved).length;
   const pendingEdits = session.edits.filter((e) => !e.applied).length;
@@ -353,7 +365,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
   return (
     <aside className="side" aria-label="Review panel">
-      <div className="tabs" role="tablist" aria-label="Review views">
+      {showTabs && <div className="tabs" role="tablist" aria-label="Review views">
         {TABS.map(([key, label]) => (
           <button
             key={key}
@@ -371,24 +383,25 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
             )}
           </button>
         ))}
-      </div>
+      </div>}
 
       {tab === 'feedback' && (
         <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby="tab-feedback">
           <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} />
+          <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open</option><option value="all">All history</option><option value="resolved">Resolved</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search feedback" aria-label="Search feedback" /></div>
           <ul className="list">
             {session.comments.length === 0 && (
               <li className="empty-state">
                 Nothing tagged yet. Click an element in the preview, then leave a comment.
               </li>
             )}
-            {[...session.comments].reverse().map((c) => (
+            {[...session.comments].filter((c) => filter === 'all' || (filter === 'resolved' ? c.resolved : !c.resolved)).filter((c) => !query || c.text.toLowerCase().includes(query.toLowerCase())).reverse().map((c) => (
               <CommentItem
                 key={c.id}
                 comment={c}
                 element={session.elements.find((e) => e.id === c.elementId)}
                 onToggle={toggleComment}
-                onDelete={drop.bind(null, 'comments', c.id)}
+                onUpdate={updateComment}
                 onSelect={onSelect}
               />
             ))}
@@ -396,7 +409,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
         </div>
       )}
 
-      {tab === 'elements' && (
+      {tab === 'inspect' && (
         <div className="panel" role="tabpanel" id="panel-elements" aria-labelledby="tab-elements">
           <ul className="list">
             {session.elements.length === 0 && (
@@ -416,7 +429,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
         </div>
       )}
 
-      {tab === 'edits' && (
+      {tab === 'changes' && (
         <div className="panel" role="tabpanel" id="panel-edits" aria-labelledby="tab-edits">
           <ul className="list">
             {session.edits.length === 0 && (

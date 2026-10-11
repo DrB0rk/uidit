@@ -1,0 +1,20 @@
+iframe[data-uidit-ui] {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 62px;
+  height: 62px;
+  border: 0;
+  z-index: 2147483647;
+  background: transparent;
+}
+
+iframe[data-uidit-ui].uidit-open {
+  width: 320px;
+  height: 500px;
+}
+
+iframe[data-uidit-ui].uidit-left {
+  right: auto;
+  left: 16px;
+}

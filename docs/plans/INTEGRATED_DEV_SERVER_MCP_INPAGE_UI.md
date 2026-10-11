@@ -1,6 +1,6 @@
 # UIDIT: single-command dev server, in-page controls, and local MCP
 
-**Status:** Architecture and implementation plan (not yet implemented)  
+**Status:** Implemented baseline in UIDIT 0.3.0; protocol interoperability and full acceptance coverage remain open
 **Date:** 2026-10-11  
 **Target:** DrB0rk/uidit (master)  
 **Design principle:** One UIDIT command starts the chosen application dev server; the application itself is the review surface; humans and coding agents share one real-time state.
@@ -16,13 +16,19 @@ $ cd my-project
 $ uidit
 uidit  starting: pnpm dev
 app    ready: http://127.0.0.1:5173/
-review http://127.0.0.1:7717/
+review http://127.0.0.1:7718/
 mcp    available locally
 ~~~
 
 Open the review URL: the **site fills the entire page**. A compact floating UIDIT button opens an action popover. The popover opens an optional right-side management drawer. The ordinary site remains usable when inspection mode is off.
 
-This is a design and execution plan, not a claim that the current repository already launches a dev server or exposes MCP.
+This document records the target design and implementation status. The launcher, split-origin preview/control service, in-page controls, shared review state, and authenticated local MCP server are implemented. The official npm MCP SDK currently resolves to 1.32.1 (there is no published v2 package), so 2026 protocol-version negotiation and `subscriptions/listen` compatibility are not claimed by this release. The expanded browser, security, and legacy/modern-client acceptance matrix also remains to be completed.
+
+### UIDIT 0.3.0 implementation status
+
+- **Implemented:** detected/explicit dev commands, managed and attached process modes, project runtime lock, two loopback origins, preview overlay and isolated floating controls, mockup-inspired full-screen workspace and six drawer sections, feedback/element/edit persistence, live browser state, authenticated HTTP MCP plus stdio bridge, resources/tools, optional agent write/process-control permissions, and configuration migration.
+- **Implemented with limits:** session revisioning and filesystem reconciliation are in place, but not a durable event log with replay/sequence IDs; MCP resource updates use the available SDK 1.x subscription model.
+- **Open:** MCP 2026-07-28 and legacy-client interoperability verification, per-client token/revocation management, comprehensive hostile-origin and cross-stack acceptance coverage, and broader non-Node launch command discovery.
 
 ## Repository audit: what exists today
 
@@ -66,7 +72,7 @@ uidit -- cargo run
 uidit --cmd "my-dev-command"    # shell syntax requires explicit opt-in / confirmation
 uidit --attach http://127.0.0.1:4321  # connect to already running target; do NOT own it
 uidit --no-start               # existing discover/manual-connect behavior
-uidit start --port 7717        # compatibility entry point; document new behavior
+uidit start --port 7718        # compatibility control/dashboard port
 uidit status                   # existing feedback summary + server status
 uidit dev status|start|stop|restart|logs
 uidit mcp info                 # endpoint, transport and copyable client config
@@ -107,8 +113,9 @@ Additive and migration-safe from existing version 1. **Illustrative**, final sch
 ~~~json
 {
   "version": 2,
-  "dashboardPort": 7717,
+  "dashboardPort": 7718,
   "controlPort": 7718,
+  "previewPort": 7717,
   "targetUrl": null,
   "dev": {
     "command": ["pnpm", "dev"],
@@ -124,7 +131,7 @@ Additive and migration-safe from existing version 1. **Illustrative**, final sch
   },
   "mcp": {
     "enabled": true,
-    "allowAgentWrites": true,
+    "allowAgentWrites": false,
     "allowAgentServerControl": false
   }
 }

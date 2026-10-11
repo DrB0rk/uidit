@@ -22,6 +22,9 @@ export function useSession() {
   const [session, setSession] = useState(EMPTY_SESSION);
   const [status, setStatus] = useState('connecting…');
   const [live, setLive] = useState(false);
+  const [dev, setDev] = useState({ state: 'idle', logs: [] });
+  const [mcp, setMcp] = useState({ clientCount: 0 });
+  const [selection, setSelection] = useState(null);
   const sourceRef = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -33,7 +36,9 @@ export function useSession() {
 
   useEffect(() => {
     let closed = false;
-    refresh().catch((err) => setStatus(err.message));
+    Promise.all([refresh(), req('/api/dev'), req('/api/mcp')]).then(([, nextDev, nextMcp]) => {
+      if (closed) return; setDev(nextDev); setMcp(nextMcp);
+    }).catch((err) => setStatus(err.message));
 
     const source = new EventSource('/api/stream');
     sourceRef.current = source;
@@ -48,6 +53,9 @@ export function useSession() {
       const payload = JSON.parse(ev.data);
       setConfig(payload.config ?? payload);
     });
+    source.addEventListener('dev', (ev) => { if (!closed) setDev(JSON.parse(ev.data)); });
+    source.addEventListener('mcp', (ev) => { if (!closed) setMcp(JSON.parse(ev.data)); });
+    source.addEventListener('selection', (ev) => { if (!closed) setSelection(JSON.parse(ev.data)); });
     source.onerror = () => {
       if (!closed) {
         setLive(false);
@@ -62,11 +70,25 @@ export function useSession() {
 
   const actions = {
     setTargetUrl: (targetUrl) => req('/api/config', 'POST', { targetUrl }).then((d) => setConfig(d.config)),
+    setConfig: (patch) => req('/api/config', 'POST', patch).then((d) => setConfig(d.config)),
     comment: (body) => req('/api/comment', 'POST', body),
+    element: (body) => req('/api/element', 'POST', body),
+    edit: (body) => req('/api/edit', 'POST', body),
+    overlay: (route, method, body) => {
+      if (!['/element', '/comment', '/edit'].includes(route) || method !== 'POST') throw new Error('unsupported preview bridge request');
+      return req(`/api${route}`, method, body);
+    },
     patch: (collection, id, patchBody) => req(`/api/${collection}/${encodeURIComponent(id)}`, 'PATCH', patchBody),
     remove: (collection, id) => req(`/api/${collection}/${encodeURIComponent(id)}`, 'DELETE'),
     discover: () => req('/api/discover').then((d) => d.targets),
+    dev: () => req('/api/dev'),
+    devAction: (action) => {
+      if (!['start', 'stop', 'restart'].includes(action)) throw new Error('unsupported server action');
+      return req(`/api/dev/${action}`, 'POST', {});
+    },
+    mcp: () => req('/api/mcp'),
+    selectElement: (selection) => req('/api/selection', 'POST', selection),
   };
 
-  return { config, session, status, live, refresh, actions };
+  return { config, session, status, live, dev, mcp, selection, refresh, actions };
 }

@@ -108,11 +108,11 @@ uidit mcp stdio           # stdio bridge for MCP clients; UIDIT must be running
 ```
 
 UIDIT exposes an authenticated, loopback-only Streamable HTTP MCP endpoint at
-`http://127.0.0.1:7718/mcp`. Run `uidit mcp info` to obtain the project token and
-connection details. The token is stored under `.uidit/runtime/` with owner-only
-permissions; `.uidit/` is ignored by `uidit init`. Agent feedback writes are
-enabled by default and dev process control is disabled unless explicitly enabled
-with `mcp.allowAgentServerControl` in `.uidit/config.json`.
+`http://127.0.0.1:7718/mcp` by default. Run `uidit mcp info` to obtain the project
+token and connection details. The token is stored under `.uidit/runtime/` with
+owner-only permissions; `.uidit/` is ignored by `uidit init`. MCP connections are
+enabled by default, while agent writes and dev process control are disabled until
+you enable them in the Agents panel or `.uidit/config.json`.
 
 An `uidit` skill for agents is bundled in [`skills/uidit/`](skills/uidit/) —
 copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
@@ -122,7 +122,7 @@ copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
 | Command | Does |
 | --- | --- |
 | `uidit init` | create `.uidit/` in the current project |
-| `uidit start [port]` | run the dashboard (default 7717) and discover dev servers |
+| `uidit start [--port N]` | run the review UI and preview proxy (control port defaults to 7718) |
 | `uidit -- <command...>` | launch an explicit project dev command |
 | `uidit --attach <url>` | attach to a local server without stopping it |
 | `uidit --no-start` | legacy manual discovery workflow |
@@ -132,25 +132,25 @@ copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
 | `uidit resolve [ids…]` | resolve comments |
 | `uidit build` | rebuild the dashboard UI |
 
-Keyboard: `1` and `2` switch modes, `Cmd/Ctrl+Enter` posts a comment, `Escape`
-clears the selection.
+Keyboard: `I` toggles inspection, `C` opens Feedback, `G` opens the workspace,
+`Escape` closes the current panel, and `U` restores hidden in-page controls.
 
 ## How it works
 
 ```
 your dev server :3000
         │
-        │  reverse proxy, injects overlay.js
+        │  preview proxy :7717, injects unprivileged overlay.js
         ▼
-uidit server :7717 ──── /api        REST + SSE
-        │
-        ├─── Astro dashboard UI (built to dashboard/dist)
-        └─── .uidit/session.json  ◄── your agent
+your browser ───── isolated control UI + REST/SSE + MCP :7718
+                         │
+                         └── .uidit/session.json  ◄── your agent
 ```
 
-The previewed page runs on uidit's origin, which is what makes the injection
-possible. The overlay talks to the dashboard over `postMessage` and persists
-through the same REST API the dashboard uses.
+The preview runs on a separate loopback origin from the dashboard and MCP. The
+injected overlay has no privileged token; it sends a narrow set of review actions
+to the trusted dashboard using origin-checked `postMessage` and persists through
+the control API.
 
 ### Layout
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { uiditDir, readSession } from './store.js';
+import { uiditDir, readSession, writeSession } from './store.js';
 
 /**
  * Fan-out hub. Every dashboard client holds one SSE connection; mutations made
@@ -13,6 +13,8 @@ export function createHub({ cwd = process.cwd() } = {}) {
   const listeners = new Set();
   let watcher = null;
   let timer = null;
+  let selection = null;
+  let lastRevision = readSession(cwd).revision ?? 0;
 
   const push = (event, data) => {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -22,6 +24,9 @@ export function createHub({ cwd = process.cwd() } = {}) {
   const emit = (type, data) => { for (const listener of listeners) listener(type, data); };
   const broadcastSession = () => { const data = readSession(cwd); push('session', data); emit('session', data); };
   const broadcastConfig = () => { const data = { config: readConfigSafe(cwd) }; push('config', data); emit('config', data); };
+  const broadcastDev = (data) => { push('dev', data); emit('dev', data); };
+  const broadcastSelection = (data) => { selection = data; push('selection', data); emit('selection', data); };
+  const broadcastMcp = (data) => { push('mcp', data); emit('mcp', data); };
 
   function readConfigSafe(dir) {
     try {
@@ -41,7 +46,14 @@ export function createHub({ cwd = process.cwd() } = {}) {
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (filename === 'config.json') broadcastConfig();
-        else broadcastSession();
+        else {
+          try {
+            let session = readSession(cwd);
+            if (session.revision <= lastRevision) session = writeSession(cwd, session);
+            lastRevision = session.revision;
+          } catch { /* preserve malformed external edits and report via API on read */ }
+          broadcastSession();
+        }
       }, 80);
     });
   };
@@ -56,11 +68,14 @@ export function createHub({ cwd = process.cwd() } = {}) {
     /** Called after any uidit mutation; debounced so one action = one push. */
     notify() {
       clearTimeout(timer);
-      timer = setTimeout(broadcastSession, 60);
+      timer = setTimeout(() => { lastRevision = readSession(cwd).revision ?? lastRevision; broadcastSession(); }, 60);
     },
     notifyConfig() {
       broadcastConfig();
     },
+    notifyDev: broadcastDev,
+    notifySelection: broadcastSelection,
+    notifyMcp: broadcastMcp,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     watch,
     close() {
@@ -74,6 +89,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
     get clientCount() {
       return clients.size;
     },
+    get selection() { return selection; },
   };
 
   function broadcastTo(res) {

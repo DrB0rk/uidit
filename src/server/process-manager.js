@@ -23,7 +23,7 @@ export function createProcessManager({ cwd = process.cwd(), onChange = () => {},
     publish();
   };
   function status() {
-    return { state, url, pid: child?.pid ?? null, command: child ? [child.spawnfile, ...child.spawnargs].join(' ') : null, error, logs: logs.slice(-80) };
+    return { state, url, pid: child?.pid ?? null, command: child ? redact([child.spawnfile, ...child.spawnargs].join(' ')) : null, owned: Boolean(child), error, logs: logs.slice(-80) };
   }
   function probe(address) {
     return new Promise((resolve) => {
@@ -74,10 +74,16 @@ export function createProcessManager({ cwd = process.cwd(), onChange = () => {},
       else owned.kill('SIGTERM');
     } catch {}
     const timer = setTimeout(() => {
-      try { if (process.platform !== 'win32' && owned.pid) process.kill(-owned.pid, 'SIGKILL'); else owned.kill('SIGKILL'); } catch {}
+      try {
+        if (process.platform !== 'win32' && owned.pid) process.kill(-owned.pid, 'SIGKILL');
+        else if (owned.pid) spawn('taskkill', ['/pid', String(owned.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+        else owned.kill('SIGKILL');
+      } catch {}
     }, 4000);
     await exited; clearTimeout(timer); state = 'stopped'; publish(); return status();
   }
-  return { start, stop, status, logs: (after = 0) => logs.filter((x) => x.id > after) };
+  function attach(address) { url = address; child = null; error = null; state = 'attached'; publish(); return status(); }
+  function detach() { if (child) throw new Error('cannot detach an owned process'); url = null; state = 'idle'; error = null; publish(); return status(); }
+  return { start, stop, attach, detach, status, logs: (after = 0) => logs.filter((x) => x.id > after) };
 }
 

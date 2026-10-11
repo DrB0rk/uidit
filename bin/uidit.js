@@ -10,6 +10,7 @@ import { discoverTargets } from '../src/server/discover.js';
 import { resolveDevCommand } from '../src/server/command-resolver.js';
 import { createProcessManager } from '../src/server/process-manager.js';
 import { startMcpServer, readMcpToken, runStdioBridge } from '../src/server/mcp/server.js';
+import { acquireProjectLock } from '../src/server/runtime-lock.js';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(PKG_ROOT, 'dashboard', 'dist');
@@ -35,33 +36,54 @@ function buildDashboard() {
 const commands = {
   async init(cwd) {
     const { created, dir } = store.init(cwd);
-    const ignore = path.join(cwd, '.gitignore');
-    if (fs.existsSync(path.join(cwd, '.git')) || fs.existsSync(path.join(cwd, '.gitignore'))) {
-      const current = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8') : '';
-      if (!/(^|\n)\.uidit\/(?:\n|$)/.test(current)) fs.appendFileSync(ignore, `${current && !current.endsWith('\n') ? '\n' : ''}.uidit/\n`);
-    }
     console.log(created ? `${c.accent('✓')} created ${c.bold(dir)}` : `${c.dim('•')} ${dir} already exists`);
     console.log(`\nRun ${c.accent('uidit')} to start a detected dev server, or configure .uidit/config.json.`);
   },
 
   async start(cwd, argv) {
-    let port = Number(store.readConfig(cwd)?.dashboardPort ?? 7717);
-    const portIndex = argv.indexOf('--port');
-    const legacyPort = argv.find((a) => /^\d+$/.test(a));
+    const initialConfig = store.readConfig(cwd);
+    let port = Number(initialConfig?.controlPort ?? initialConfig?.dashboardPort ?? 7718);
+    const configuredPreviewPort = Number(initialConfig?.previewPort ?? 7717);
+    const separator = argv.indexOf('--');
+    const optionArgs = separator < 0 ? argv : argv.slice(0, separator);
+    const portIndex = optionArgs.indexOf('--port');
+    const legacyPort = optionArgs.length === 1 && /^\d+$/.test(optionArgs[0]) ? optionArgs[0] : null;
     if (portIndex >= 0 || legacyPort) { const value = Number(portIndex >= 0 ? argv[portIndex + 1] : legacyPort); if (!Number.isInteger(value) || value < 1 || value > 65535) throw new Error('--port requires a valid TCP port'); port = value; }
     if (!store.isInitialized(cwd)) store.init(cwd);
+    const runtimeLock = acquireProjectLock(cwd);
+    process.once('exit', runtimeLock.release);
     if (!dashboardBuilt()) {
       console.log(`${c.dim('building dashboard…')}`);
       await buildDashboard();
     }
-    const url = `http://127.0.0.1:${port}`;
-    const { server: dashboardServer, hub } = await startServer({ cwd, port });
-    const processManager = createProcessManager({ cwd, onChange: (status) => { if (status.url && status.url !== store.readConfig(cwd)?.targetUrl) { store.writeConfig(cwd, { targetUrl: status.url, dev: { url: status.url } }); hub.notifyConfig(); } } });
+    let hub = null;
+    const processManager = createProcessManager({ cwd, onChange: (status) => {
+      hub?.notifyDev(status);
+      if (status.url && status.url !== store.readConfig(cwd)?.targetUrl) { store.writeConfig(cwd, { targetUrl: status.url, dev: { url: status.url } }); hub?.notifyConfig(); }
+    } });
+    const preview = await startServer({ cwd, port: configuredPreviewPort, controlPort: port, previewOnly: true });
+    hub = preview.hub;
     let mcp;
-    try { mcp = await startMcpServer({ cwd, port: store.readConfig(cwd)?.controlPort ?? 7718, dashboardPort: port, processManager, hub }); }
-    catch (err) { hub.close(); dashboardServer.close(); throw err; }
+    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, hub }); }
+    catch (err) { hub.close(); preview.server.close(); throw err; }
+    let stopping = false;
+    const bye = async () => {
+      if (stopping) return;
+      stopping = true;
+      await processManager.stop();
+      hub.close(); await mcp.close(); preview.server.close();
+      runtimeLock.release();
+      console.log(`\n  ${c.dim('uidit stopped. Your feedback is saved in .uidit/')}`);
+      process.exit(0);
+    };
+    process.once('SIGINT', bye);
+    process.once('SIGTERM', bye);
+    store.writeConfig(cwd, { dashboardPort: mcp.port, controlPort: mcp.port, previewPort: preview.port });
+    hub.notifyConfig();
+    const url = mcp.controlUrl;
 
     console.log(`\n  ${c.accent('uidit')} ${c.dim(`dashboard → ${url}`)}`);
+    console.log(`  ${c.dim(`preview   → ${preview.url}`)}`);
     console.log(`  ${c.dim(`mcp       → ${mcp.url}`)}`);
     console.log(`  ${c.dim(`session   → ${path.join(store.uiditDir(cwd), 'session.json')}`)}`);
 
@@ -73,19 +95,21 @@ const commands = {
       const parsed = new URL(attachedUrl);
       if (!/^https?:$/.test(parsed.protocol) || !['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) throw new Error('--attach must be a local http(s) URL');
       store.writeConfig(cwd, { targetUrl: parsed.href });
+      processManager.attach(parsed.href);
       console.log(`\n  ${c.dim(`attached → ${parsed.href} (uidit will not stop it)`)}`);
     } else if (!noStart) {
       const spec = resolveDevCommand(cwd, explicit);
       if (spec) {
+        store.writeConfig(cwd, { dev: { command: [spec.command, ...spec.args], cwd: path.relative(cwd, spec.cwd) || '.' } });
         console.log(`\n  ${c.dim(`starting → ${[spec.command, ...spec.args].join(' ')}`)}`);
         try { await processManager.start(spec); }
-        catch (err) { await processManager.stop(); hub.close(); await mcp.close(); dashboardServer.close(); throw err; }
+        catch (err) { await processManager.stop(); hub.close(); await mcp.close(); preview.server.close(); throw err; }
         console.log(`  ${c.accent(`ready → ${processManager.status().url}`)}`);
       } else {
         console.log(`\n  ${c.dim('No dev command found; use uidit -- <command> or uidit --attach http://127.0.0.1:3000')}`);
       }
     }
-    const targets = await discoverTargets({ excludePorts: [port, store.readConfig(cwd)?.controlPort ?? 7718] });
+    const targets = await discoverTargets({ excludePorts: [preview.port, mcp.port] });
     if (targets.length) {
       console.log(`\n  ${c.bold('Local servers found')} ${c.dim('— pick one with Discover, or paste a URL')}`);
       for (const t of targets) console.log(`    ${c.accent(t.url)}${t.title ? c.dim(` — ${t.title}`) : ''}`);
@@ -100,14 +124,6 @@ const commands = {
     }
     console.log(`\n  ${c.dim('Ctrl+C to stop.')}\n`);
 
-    const bye = async () => {
-      await processManager.stop();
-      hub.close(); await mcp.close(); dashboardServer.close();
-      console.log(`\n  ${c.dim('uidit stopped. Your feedback is saved in .uidit/')}`);
-      process.exit(0);
-    };
-    process.once('SIGINT', bye);
-    process.once('SIGTERM', bye);
   },
 
   async mcp(cwd, argv) {

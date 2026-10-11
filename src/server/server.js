@@ -59,8 +59,8 @@ function serveStatic(res, file, { injectOverlay = false } = {}) {
 }
 
 export function injectIntoHtml(html, targetOrigin = '', controlOrigin = 'http://127.0.0.1:7718') {
-  const tag = `<script src="/overlay.js" data-uidit="1"></script>` +
-    `<script>window.__UIDIT_TARGET__=${JSON.stringify(targetOrigin)};window.__UIDIT_CONTROL__=${JSON.stringify(controlOrigin)}</script>`;
+  const attr = (value) => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+  const tag = `<link rel="stylesheet" href="/overlay.css" data-uidit="1"><script src="/overlay.js" data-uidit="1" data-target="${attr(targetOrigin)}" data-control="${attr(controlOrigin)}"></script>`;
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}\n${tag}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}\n<head>${tag}</head>`);
   return `${tag}\n${html}`;
@@ -121,13 +121,36 @@ function scrubHtmlHeaders(headers) {
   delete out['last-modified'];
   delete out['content-encoding'];
   delete out['transfer-encoding'];
-  // A CSP that only allows the dev server's own scripts would block the overlay.
-  delete out['content-security-policy'];
-  delete out['content-security-policy-report-only'];
   // Cookies scoped to the dev server's domain would never come back to uidit.
   if (out['set-cookie']) {
     out['set-cookie'] = out['set-cookie'].map((c) => c.replace(/;\s*domain=[^;]*/gi, ''));
   }
+  return out;
+}
+
+function extendPreviewCsp(headers, controlOrigin) {
+  const out = { ...headers };
+  if (!out['content-security-policy']) return out;
+  out['content-security-policy'] = out['content-security-policy'].split(',').map((policy) => {
+    const directives = policy.split(';').map((part) => part.trim()).filter(Boolean);
+    const index = (name) => directives.findIndex((d) => d.split(/\s+/, 1)[0].toLowerCase() === name);
+    let scripts = index('script-src');
+    if (scripts < 0 && index('default-src') >= 0) directives.push("script-src 'self'");
+    else if (scripts >= 0 && !/(^|\s)'self'(?:\s|$)/i.test(directives[scripts])) directives[scripts] += " 'self'";
+    let styles = index('style-src');
+    if (styles < 0 && index('default-src') >= 0) directives.push("style-src 'self'");
+    else if (styles >= 0 && !/(^|\s)'self'(?:\s|$)/i.test(directives[styles])) directives[styles] += " 'self'";
+    const frames = index('frame-src');
+    if (frames < 0) directives.push(`frame-src 'self' ${controlOrigin}`);
+    else {
+      const sources = directives[frames].split(/\s+/);
+      if (sources.includes("'none'")) directives[frames] = `frame-src 'self' ${controlOrigin}`;
+      else if (!sources.includes("'self'")) directives[frames] += " 'self'";
+      else if (!sources.includes(controlOrigin)) directives[frames] += ` ${controlOrigin}`;
+    }
+    if (frames >= 0 && !directives[frames].includes(controlOrigin)) directives[frames] += ` ${controlOrigin}`;
+    return directives.join('; ');
+  }).join(', ');
   return out;
 }
 
@@ -171,7 +194,8 @@ async function proxyRequest(req, res, target, controlOrigin) {
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
         const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), url.origin, controlOrigin);
-        const outHeaders = scrubHtmlHeaders({ ...headers, 'content-length': Buffer.byteLength(html) });
+        const outHeaders = scrubHtmlHeaders(extendPreviewCsp(headers, controlOrigin));
+        outHeaders['content-length'] = Buffer.byteLength(html);
         res.writeHead(status, outHeaders);
         res.end(html);
       });
@@ -184,8 +208,8 @@ async function proxyRequest(req, res, target, controlOrigin) {
   req.pipe(upstream);
 }
 
-export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718 } = {}) {
-  const controlOrigin = `http://127.0.0.1:${controlPort}`;
+export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718, previewOnly = false } = {}) {
+  const controlOrigin = () => `http://127.0.0.1:${store.readConfig(cwd)?.controlPort ?? controlPort}`;
   const server = http.createServer(async (req, res) => {
     // A browser aborting a request (navigation, closed tab) must not take down the
     // dashboard — without this, one ECONNRESET crashes the whole process.
@@ -194,7 +218,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
     const route = url.pathname;
 
     try {
-      if (route === '/api/stream') {
+      if (!previewOnly && route === '/api/stream') {
         res.writeHead(200, {
           'content-type': 'text/event-stream',
           'cache-control': 'no-cache, no-transform',
@@ -208,19 +232,20 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
 
       // uidit's own files win over the proxy: Astro emits /_astro/*, and the overlay
       // lives at the root, so anything we ship locally must never be forwarded.
-      const dashboardFile = route === '/' ? path.join(DASHBOARD_DIST, 'index.html') : path.join(DASHBOARD_DIST, route);
-      if (route === '/' || fs.existsSync(dashboardFile)) {
+      const dashboardFile = route === '/' ? path.join(DASHBOARD_DIST, 'index.html') : path.resolve(DASHBOARD_DIST, `.${decodeURIComponent(route)}`);
+      if (!previewOnly && (route === '/' || (dashboardFile.startsWith(`${DASHBOARD_DIST}${path.sep}`) && fs.existsSync(dashboardFile)))) {
         if (fs.existsSync(dashboardFile)) return serveStatic(res, dashboardFile);
         return serveStatic(res, path.join(PUBLIC_DIR, 'fallback.html'));
       }
 
       if (route === '/overlay.js') return serveStatic(res, path.join(PUBLIC_DIR, 'overlay.js'));
+      if (route === '/overlay.css') return serveStatic(res, path.join(PUBLIC_DIR, 'overlay.css'));
 
       // uidit owns a fixed set of API routes. Anything else under /api/ belongs to
       // the previewed app — real apps use /api/* too, so claiming the whole namespace
       // would break their data loading.
       const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|edit)(?:\/|$)/;
-      if (UIDIT_API.test(route)) {
+      if (!previewOnly && UIDIT_API.test(route)) {
         if (route === '/api/state') {
           return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd) });
         }
@@ -280,7 +305,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         // uidit's own reload cache-buster is not part of the target's URL space.
         url.searchParams.delete('r');
         target.search = url.search;
-        return proxyRequest(req, res, target, controlOrigin);
+        return proxyRequest(req, res, target, controlOrigin());
       }
 
       // The previewed page runs on uidit's origin, so its own URLs — root-absolute
@@ -291,7 +316,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         const target = safeTargetUrl(config.targetUrl);
         target.pathname = `${target.pathname.replace(/\/$/, '')}${route}`;
         target.search = url.search;
-        return proxyRequest(req, res, target, controlOrigin);
+        return proxyRequest(req, res, target, controlOrigin());
       }
 
       return json(res, 404, { error: 'not found' });
@@ -307,10 +332,10 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
   return server;
 }
 
-export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718 } = {}) {
+export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718, previewOnly = false } = {}) {
   const hub = createHub({ cwd });
   hub.watch();
-  const server = createServer({ cwd, hub, port, controlPort });
+  const server = createServer({ cwd, hub, port, controlPort, previewOnly });
 
   // Hot reload runs over a websocket; without this the preview renders but never
   // refreshes when the user saves a file.
@@ -346,8 +371,14 @@ export function startServer({ cwd = process.cwd(), port = 7717, controlPort = st
     })().catch(() => socket.destroy());
   });
 
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve({ server, hub }));
+  const listen = (requestedPort) => new Promise((resolve, reject) => {
+    const failed = (error) => {
+      server.removeListener('listening', ready);
+      if (error.code === 'EADDRINUSE' && requestedPort !== 0) return listen(0).then(resolve, reject);
+      reject(error);
+    };
+    const ready = () => { server.removeListener('error', failed); resolve(server.address().port); };
+    server.once('error', failed); server.once('listening', ready); server.listen(requestedPort, '127.0.0.1');
   });
+  return listen(port).then((actualPort) => ({ server, hub, port: actualPort, url: `http://127.0.0.1:${actualPort}` }));
 }

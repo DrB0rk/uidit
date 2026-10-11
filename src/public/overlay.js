@@ -1,11 +1,11 @@
-/* uidit overlay — injected into the previewed page by the uidit dashboard server.
-   Talks to the dashboard with postMessage, and persists everything to .uidit
-   through the dashboard's own API (same origin). */
+/* UIDIT's preview bridge. The page is untrusted; all persistence is delegated to
+   the trusted parent dashboard through a narrow message protocol. */
 (() => {
   if (window.__uiditOverlay) return;
   window.__uiditOverlay = true;
 
-  const API = '/api';
+  const pendingRequests = new Map();
+  let nextRequest = 0;
   const state = {
     mode: 'off',
     selected: null,
@@ -17,24 +17,33 @@
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
   const controls = document.createElement('iframe');
-  const controlOrigin = window.__UIDIT_CONTROL__ || 'http://127.0.0.1:7718';
-  controls.src = `${controlOrigin}/floating`;
+  const bootstrap = document.currentScript;
+  const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:7718';
+  // The dashboard may have been opened as localhost while the bridge uses the
+  // numeric loopback address. Use the actual embedding origin for postMessage.
+  const parentOrigin = (() => {
+    try {
+      const origin = new URL(document.referrer).origin;
+      const parentUrl = new URL(origin);
+      const expectedPort = new URL(controlOrigin).port;
+      return ['localhost', '127.0.0.1', '[::1]'].includes(parentUrl.hostname) && parentUrl.port === expectedPort ? origin : controlOrigin;
+    } catch { return controlOrigin; }
+  })();
+  window.__UIDIT_TARGET__ = bootstrap?.dataset.target || '';
+  controls.src = `${controlOrigin}/floating?preview=${encodeURIComponent(location.origin)}`;
   controls.title = 'UIDIT review controls';
   controls.setAttribute('data-uidit-ui', '1');
-  controls.style.cssText = 'position:fixed;right:16px;bottom:16px;width:52px;height:52px;border:0;z-index:2147483647;background:transparent';
   (document.documentElement || document).append(controls);
 
-  const post = (type, payload) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, '*');
+  const post = (type, payload = {}) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, parentOrigin);
 
-  const api = async (route, method, body) => {
-    const res = await fetch(`${API}${route}`, {
-      method,
-      headers: { 'content-type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw new Error(`${method} ${route} → ${res.status}`);
-    return res.json();
-  };
+  const api = (route, method, body) => new Promise((resolve, reject) => {
+    if (window.parent === window) return reject(new Error('Open this preview in UIDIT to save review changes'));
+    const id = `u${++nextRequest}-${Date.now()}`;
+    const timer = setTimeout(() => { pendingRequests.delete(id); reject(new Error('UIDIT control bridge timed out')); }, 15000);
+    pendingRequests.set(id, { resolve, reject, timer });
+    window.parent.postMessage({ source: 'uidit-overlay', type: 'api-request', id, route, method, body }, parentOrigin);
+  });
 
   const collapse = (s) => (s ?? '').replace(/\s+/g, ' ').trim();
 
@@ -191,17 +200,32 @@
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (ev.source === controls.contentWindow && ev.origin === controlOrigin && msg?.source === 'uidit-control') {
-      if (msg.type === 'resize') { controls.style.width = msg.open === true ? '264px' : '52px'; controls.style.height = msg.open === true ? '360px' : '52px'; }
-      if (msg.type === 'inspect') { state.mode = state.mode === 'inspect' ? 'off' : 'inspect'; post('mode', { mode: state.mode }); }
-      if (msg.type === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) {
-        api('/comment', 'POST', { elementId: state.selected?.record.id ?? null, page: realPage(), text: msg.text.trim() })
-          .then(({ comment }) => post('commented', { comment }))
-          .catch((err) => post('error', { message: err.message }));
-      }
+      if (msg.type === 'resize') controls.classList.toggle('uidit-open', msg.open === true);
+      if (msg.type === 'action' && msg.action === 'inspect' && typeof msg.enabled === 'boolean') post('control', { action: 'inspect', enabled: msg.enabled });
+      if (msg.type === 'action' && msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) post('control', { action: 'comment', text: msg.text.trim(), page: realPage(), elementId: state.selected?.record.id ?? null });
+      if (msg.type === 'action' && msg.action === 'workspace' && ['feedback', 'inspect', 'changes', 'server', 'agents', 'settings'].includes(msg.tab)) post('control', { action: 'workspace', tab: msg.tab });
+      if (msg.type === 'action' && msg.action === 'hide') controls.hidden = true;
       return;
     }
-    if (!msg || msg.source !== 'uidit-dashboard') return;
+    if (ev.source !== window.parent || ev.origin !== parentOrigin || !msg || msg.source !== 'uidit-dashboard') return;
+    if (msg.type === 'api-response' && typeof msg.id === 'string') {
+      const pending = pendingRequests.get(msg.id); if (!pending) return;
+      clearTimeout(pending.timer); pendingRequests.delete(msg.id);
+      if (msg.ok) pending.resolve(msg.result); else pending.reject(new Error(msg.error || 'UIDIT request failed'));
+      return;
+    }
+    if (msg.type === 'state') {
+      const left = msg.position === 'bottom-left';
+      controls.classList.toggle('uidit-left', left);
+      controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'state', ...msg }, controlOrigin); return;
+    }
+    if (msg.type === 'escape') { controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin); }
+    if (msg.type === 'hideControls') { controls.hidden = true; return; }
     handle(msg).catch((err) => post('error', { message: err.message }));
+  });
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key.toLowerCase() === 'u' && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !/INPUT|TEXTAREA/.test(ev.target?.tagName ?? '')) controls.hidden = false;
   });
 
   async function handle(msg) {

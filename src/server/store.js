@@ -16,7 +16,7 @@ export function isInitialized(cwd = process.cwd()) {
   return fs.existsSync(path.join(uiditDir(cwd), 'config.json'));
 }
 
-const EMPTY = () => ({ version: 1, updatedAt: null, elements: [], comments: [], edits: [] });
+const EMPTY = () => ({ version: 1, revision: 0, updatedAt: null, elements: [], comments: [], edits: [] });
 
 function writeAtomic(file, contents) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -34,6 +34,9 @@ export function init(cwd = process.cwd(), { force = false } = {}) {
   writeAtomic(path.join(dir, 'session.json'), `${JSON.stringify(EMPTY(), null, 2)}\n`);
   const readme = path.join(dir, 'README.md');
   if (!fs.existsSync(readme) || force) fs.writeFileSync(readme, AGENT_README);
+  const gitignore = path.join(projectRoot(cwd), '.gitignore');
+  const ignored = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : '';
+  if (!/(^|\n)\.uidit\/(?:\n|$)/.test(ignored)) fs.appendFileSync(gitignore, `${ignored && !ignored.endsWith('\n') ? '\n' : ''}.uidit/\n`);
   return { created: true, dir, config };
 }
 
@@ -44,15 +47,17 @@ export function readConfig(cwd = process.cwd()) {
 }
 
 function defaultConfig() {
-  return { version: 2, dashboardPort: 7717, controlPort: 7718, targetUrl: null,
+  return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
     ui: { position: 'bottom-right', defaultOpen: false, inspectionDefault: false },
-    mcp: { enabled: true, allowAgentWrites: true, allowAgentServerControl: false } };
+    mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false } };
 }
 
 export function migrateConfig(value = {}) {
   const base = defaultConfig();
-  return { ...base, ...value, version: 2, dev: { ...base.dev, ...(value.dev ?? {}) },
+  const controlPort = value.controlPort ?? value.dashboardPort ?? base.controlPort;
+  return { ...base, ...value, version: 2, dashboardPort: controlPort, controlPort,
+    previewPort: value.previewPort ?? base.previewPort, dev: { ...base.dev, ...(value.dev ?? {}) },
     ui: { ...base.ui, ...(value.ui ?? {}) }, mcp: { ...base.mcp, ...(value.mcp ?? {}) } };
 }
 
@@ -70,7 +75,7 @@ export function readSession(cwd = process.cwd()) {
   if (!fs.existsSync(file)) return EMPTY();
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { ...EMPTY(), ...parsed };
+    return { ...EMPTY(), ...parsed, revision: Number.isSafeInteger(parsed.revision) ? parsed.revision : 0 };
   } catch (error) {
     // Preserve corrupt user data. Returning an empty session here made the next
     // mutation silently overwrite the only copy of their review history.
@@ -79,7 +84,7 @@ export function readSession(cwd = process.cwd()) {
 }
 
 export function writeSession(cwd, session) {
-  const next = { ...session, version: 1, updatedAt: new Date().toISOString() };
+  const next = { ...session, version: 1, revision: (Number(session.revision) || 0) + 1, updatedAt: new Date().toISOString() };
   fs.mkdirSync(uiditDir(cwd), { recursive: true });
   writeAtomic(path.join(uiditDir(cwd), 'session.json'), `${JSON.stringify(next, null, 2)}\n`);
   return next;
@@ -160,6 +165,7 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
 \`\`\`jsonc
 {
   "version": 1,
+  "revision": 0,
   "updatedAt": "ISO-8601",
   "elements": [
     {
