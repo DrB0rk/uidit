@@ -75,7 +75,9 @@ export function readSession(cwd = process.cwd()) {
   if (!fs.existsSync(file)) return EMPTY();
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { ...EMPTY(), ...parsed, revision: Number.isSafeInteger(parsed.revision) ? parsed.revision : 0 };
+    const session = { ...EMPTY(), ...parsed, revision: Number.isSafeInteger(parsed.revision) ? parsed.revision : 0 };
+    session.comments = Array.isArray(session.comments) ? session.comments.map((comment) => ({ ...comment, replies: Array.isArray(comment.replies) ? comment.replies : [] })) : [];
+    return session;
   } catch (error) {
     // Preserve corrupt user data. Returning an empty session here made the next
     // mutation silently overwrite the only copy of their review history.
@@ -111,12 +113,26 @@ export function addComment(cwd, comment) {
   const record = {
     id: comment.id ?? stableId('cm', `${Date.now()}:${Math.random()}`),
     resolved: false,
+    replies: [],
     createdAt: new Date().toISOString(),
     ...comment,
   };
   session.comments.push(record);
   writeSession(cwd, session);
   return record;
+}
+
+export function addCommentReply(cwd, commentId, { text, author = 'reviewer', source } = {}) {
+  if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('reply text must be 1–4000 characters');
+  if (!['reviewer', 'agent'].includes(author)) throw new Error('reply author must be reviewer or agent');
+  const session = readSession(cwd);
+  const comment = session.comments.find((item) => item.id === commentId);
+  if (!comment) return null;
+  comment.replies = Array.isArray(comment.replies) ? comment.replies : [];
+  const reply = { id: stableId('rp', `${commentId}:${Date.now()}:${Math.random()}`), text: text.trim(), author, source: source ?? author, createdAt: new Date().toISOString() };
+  comment.replies.push(reply);
+  writeSession(cwd, session);
+  return { comment, reply };
 }
 
 export function addEdit(cwd, edit) {
@@ -186,6 +202,8 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
       "elementId": "el-a1b2c3d4",                   // null = page-level note
       "page": "http://localhost:3000/cart",
       "text": "This padding is inconsistent with the card below.",
+      "anchor": { "x": 0.62, "y": 0.31 },           // normalized page point for page-level notes
+      "replies": [{ "id": "rp-1234", "author": "agent", "text": "Should I match the next card's 16px padding?", "createdAt": "ISO-8601" }],
       "drawing": null,                            // optional arrow/rectangle/ellipse/freehand with normalized page points
       "resolved": false,
       "createdAt": "ISO-8601"
@@ -225,5 +243,6 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
    \`applied: true\` means the change has been committed to source, never merely previewed.
 5. Mark feedback resolved by setting \`resolved: true\` on the comments you handled, or by
    running \`uidit resolve <commentId>\`. Never delete comments — they are the user's history.
-6. Set \`edits[].applied\` to \`true\` only after the change is committed to the real source files.
+6. If a comment needs clarification, add an agent reply with \`uidit_reply_comment\`; ask a focused question in the thread instead of guessing. Reply there when you have handled a request, then resolve the comment only when its work is complete.
+7. Set \`edits[].applied\` to \`true\` only after the change is committed to the real source files.
 `;

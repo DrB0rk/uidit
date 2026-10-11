@@ -171,11 +171,21 @@
       try { if (record?.selector) el = document.querySelector(record.selector); } catch {}
       const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
       markerNode.style.cssText='position:absolute;pointer-events:auto;left:0;top:0;transform:translate(-50%,-50%);width:27px;height:27px;border:2px solid white;border-radius:50%;background:#785bff;color:white;font:700 12px system-ui;box-shadow:0 3px 14px #17132270;cursor:pointer;';
-      const rect=el?.getBoundingClientRect(); const x=rect?rect.left+scrollX+rect.width/2:width-34; const y=rect?rect.top+scrollY:24+index*34;
+      const rect=el?.getBoundingClientRect(); const hasAnchor=Number.isFinite(c.anchor?.x)&&Number.isFinite(c.anchor?.y); const x=rect?rect.left+scrollX+rect.width/2:hasAnchor?c.anchor.x*width:width-34; const y=rect?rect.top+scrollY:hasAnchor?c.anchor.y*height:24+index*34;
       markerNode.style.left=`${x}px`; markerNode.style.top=`${y}px`;
-      const pop=document.createElement('span');pop.textContent=c.text;pop.style.cssText='display:none;position:absolute;left:30px;top:-4px;min-width:180px;max-width:280px;padding:9px 11px;border-radius:9px;background:#211e2e;color:#fff;font:12px/1.45 system-ui;box-shadow:0 8px 28px #17132255;';markerNode.append(pop);
-      markerNode.addEventListener('mouseenter',()=>pop.style.display='block'); markerNode.addEventListener('mouseleave',()=>pop.style.display='none');
-      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();if(el){restoreSelected();state.selected={el,record};el.setAttribute('data-uidit-selected','1');el.scrollIntoView({block:'center',behavior:'smooth'});}});
+      const pop=document.createElement('section');pop.className='uidit-comment-thread';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Comment thread');pop.hidden=true;pop.setAttribute('data-uidit-ui','1');
+      pop.style.cssText='position:absolute;z-index:1;left:0;top:0;transform:translate(18px,14px);width:min(300px,calc(100vw - 32px));max-height:min(360px,calc(100vh - 48px));overflow:auto;padding:12px;border:1px solid #3d3a4b;border-radius:11px;background:#211f2b;color:#f5f4fa;font:12px/1.45 system-ui;box-shadow:0 10px 32px #17132255;pointer-events:auto;';
+      pop.style.left=`${x}px`; pop.style.top=`${y}px`;
+      const head=document.createElement('div');head.textContent=`Comment ${index+1}`;head.style.cssText='font-weight:700;font-size:11px;color:#c9c4dc;margin-bottom:6px;';
+      const original=document.createElement('p');original.textContent=c.text;original.style.cssText='margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere;';
+      const replies=document.createElement('div');replies.style.cssText='display:grid;gap:6px;margin:7px 0;';
+      (Array.isArray(c.replies)?c.replies:[]).forEach((reply)=>{const item=document.createElement('div');item.style.cssText='padding:7px 8px;border-radius:7px;background:#302e3b;';const author=document.createElement('strong');author.textContent=reply.author==='agent'?'Agent':'You';author.style.cssText='display:block;margin-bottom:2px;font-size:10px;color:#c4b9ff;';const text=document.createElement('span');text.textContent=reply.text;item.append(author,text);replies.append(item);});
+      const input=document.createElement('textarea');input.maxLength=4000;input.setAttribute('aria-label','Reply to comment');input.placeholder='Reply or ask the agent a question';input.style.cssText='display:block;box-sizing:border-box;width:100%;min-height:58px;resize:vertical;padding:8px;border:1px solid #4c4959;border-radius:7px;background:#17161f;color:#fff;font:12px/1.45 system-ui;';
+      const send=document.createElement('button');send.type='button';send.textContent='Reply';send.disabled=true;send.style.cssText='display:block;margin:7px 0 0 auto;padding:6px 10px;border:0;border-radius:6px;background:#a99af5;color:#171522;font:600 11px system-ui;cursor:pointer;';
+      input.addEventListener('input',()=>{send.disabled=!input.value.trim();});
+      send.addEventListener('click',async()=>{if(!input.value.trim())return;send.disabled=true;send.textContent='Sending…';try{await api('/comment-reply','POST',{commentId:c.id,text:input.value.trim()});input.value='';pop.hidden=true;renderVisuals();}catch(err){send.disabled=false;send.textContent='Retry';post('error',{message:err.message});}});
+      pop.append(head,original,replies,input,send);visuals.append(pop);
+      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();const wasOpen=!pop.hidden;visuals.querySelectorAll('.uidit-comment-thread').forEach((thread)=>thread.hidden=true);pop.hidden=wasOpen;if(el){restoreSelected();state.selected={el,record};el.setAttribute('data-uidit-selected','1');el.scrollIntoView({block:'center',behavior:'smooth'});}});
       visuals.append(markerNode);
     });
   }
@@ -240,16 +250,19 @@
   contextMenu.hidden = true;
   document.documentElement.append(contextMenu);
   let contextTarget = null;
+  let contextPoint = null;
   let contextElementId = null;
   function closeContextMenu() {
     contextMenu.hidden = true;
     if (contextTarget && contextTarget !== state.selected?.el) paint(contextTarget, false);
     contextTarget = null;
+    contextPoint = null;
   }
   function openContextMenu(ev) {
     if (ev.target.closest?.('[data-uidit-ui]')) return;
     ev.preventDefault();
     contextTarget = ev.target.nodeType === 1 ? ev.target : ev.target.parentElement;
+    contextPoint = { x: ev.clientX, y: ev.clientY };
     contextElementId = null;
     if (contextTarget && contextTarget !== document.body && contextTarget !== document.documentElement) paint(contextTarget, true);
     const pageTarget = !contextTarget || contextTarget === document.body || contextTarget === document.documentElement;
@@ -294,7 +307,10 @@
       if (action === 'post') {
         const text = contextMenu.querySelector('textarea')?.value.trim();
         if (!text) return;
-        await api('/comment', 'POST', { elementId: contextElementId, page: realPage(), text });
+        const pageWidth=Math.max(document.documentElement.scrollWidth,innerWidth),pageHeight=Math.max(document.documentElement.scrollHeight,innerHeight);
+        const target=contextTarget&&contextTarget!==document.body&&contextTarget!==document.documentElement;
+        const anchor=!target&&contextPoint?{x:Math.max(0,Math.min(1,(contextPoint.x+scrollX)/pageWidth)),y:Math.max(0,Math.min(1,(contextPoint.y+scrollY)/pageHeight))}:null;
+        await api('/comment', 'POST', { elementId: contextElementId, page: realPage(), text, anchor });
         delete contextMenu.dataset.composer; closeContextMenu(); renderVisuals(); return;
       }
       const target = contextTarget;

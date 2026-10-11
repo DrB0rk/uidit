@@ -15,7 +15,7 @@ test('init creates config, empty session and agent README', () => {
   const cwd = tmpProject();
   const { created } = store.init(cwd);
   assert.equal(created, true);
-  assert.equal(store.readConfig(cwd).version, 1);
+  assert.equal(store.readConfig(cwd).version, 2);
   assert.deepEqual(store.readSession(cwd).comments, []);
   assert.ok(fs.existsSync(path.join(cwd, '.uidit', 'README.md')));
 });
@@ -50,6 +50,18 @@ test('comments default to unresolved and can be resolved by id', () => {
   assert.equal(store.updateRecord(cwd, 'comments', 'cm-missing', { resolved: true }), null);
 });
 
+test('comments hold attributed thread replies', () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  const comment = store.addComment(cwd, { text: 'Could you adjust the spacing?' });
+  const { reply, comment: updated } = store.addCommentReply(cwd, comment.id, { text: 'Should it match the card below?', author: 'agent' });
+  assert.equal(comment.replies.length, 0);
+  assert.equal(reply.author, 'agent');
+  assert.match(reply.text, /match the card/);
+  assert.equal(updated.replies.length, 1);
+  assert.equal(store.addCommentReply(cwd, 'cm-missing', { text: 'No parent' }), null);
+});
+
 test('edits record before/after and applied defaults to false', () => {
   const cwd = tmpProject();
   store.init(cwd);
@@ -70,8 +82,8 @@ test('remove drops only the requested record', () => {
 
 test('html injection puts the overlay first in head and exposes the target origin', () => {
   const html = injectIntoHtml('<html><head><title>x</title></head><body></body></html>', 'http://localhost:3000');
-  assert.match(html, /<head>\s*<script src="\/overlay\.js"/);
-  assert.match(html, /__UIDIT_TARGET__="http:\/\/localhost:3000"/);
+  assert.match(html, /<head>\s*<link rel="stylesheet" href="\/overlay\.css" data-uidit="1"><script src="\/overlay\.js"/);
+  assert.match(html, /data-target="http:\/\/localhost:3000"/);
 });
 
 test('html injection works without a head element', () => {

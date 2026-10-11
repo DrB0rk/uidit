@@ -16,6 +16,7 @@ import { reactServer } from './fixtures/react-site.js';
 
 const ROOT = '/tmp/uidit-stacks';
 const UIDIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BROWSER_PATH = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
 let DASH;
 
 async function freePort() {
@@ -68,7 +69,7 @@ const targets = [
 ];
 
 let failures = 0;
-const b = await chromium.launch();
+const b = await chromium.launch({ executablePath: BROWSER_PATH });
 try {
   for (const target of targets) {
     // A fresh page per target: reusing one carries the previous frame and the
@@ -79,16 +80,18 @@ try {
 
     const set = await fetch(`http://127.0.0.1:${DASH}/api/config`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` },
       body: JSON.stringify({ targetUrl: target.url }),
     });
     assert.equal(set.status, 200, 'could not set target');
 
-    await page.goto(`http://127.0.0.1:${DASH}/`);
-    await page.waitForSelector('iframe#preview.live', { timeout: 10000 });
-    await page.waitForTimeout(1200);
-
-    const frame = page.frames().find((f) => f.url().includes('/proxy'));
+    await page.goto(`http://127.0.0.1:${DASH}/?workspace=1`);
+    await page.waitForSelector('iframe.immersive-preview', { timeout: 10000 });
+    let frame;
+    for (let i = 0; i < 60 && !frame; i++) {
+      frame = page.frames().find((f) => f.url().includes('/proxy/'));
+      if (!frame) await page.waitForTimeout(200);
+    }
     const text = frame ? await frame.evaluate(() => document.body.innerText) : '';
     const overlay = frame ? await frame.evaluate(() => !!window.__uiditOverlay) : false;
 
@@ -96,6 +99,7 @@ try {
       assert.ok(frame, 'preview frame never loaded');
       assert.ok(overlay, 'overlay did not boot');
       assert.match(text, new RegExp(target.expect), `page did not render: ${text.slice(0, 80)}`);
+      await page.getByRole('button', { name: 'Inspect', exact: true }).click();
       await frame.click('button');
       await page.waitForSelector('#sel-selector:not(:empty)', { timeout: 5000 });
       console.log(`  ok  ${target.name}`);
@@ -104,7 +108,7 @@ try {
       console.error(`  FAIL ${target.name}: ${err.message}`);
       console.error(`       frames: ${page.frames().map((f) => f.url()).join(' | ')}`);
       console.error(`       page state: ${JSON.stringify(await page.evaluate(() => fetch('/api/state').then((r) => r.json()).catch((e) => ({ err: e.message })))).slice(0, 160)}`);
-      console.error(`       iframe class: ${await page.getAttribute('iframe#preview', 'class').catch(() => 'none')}`);
+      console.error(`       iframe class: ${await page.getAttribute('iframe.immersive-preview', 'class').catch(() => 'none')}`);
     }
 
     if (errors.length) {

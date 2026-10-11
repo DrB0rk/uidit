@@ -251,7 +251,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
       // uidit owns a fixed set of API routes. Anything else under /api/ belongs to
       // the previewed app — real apps use /api/* too, so claiming the whole namespace
       // would break their data loading.
-      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|edit)(?:\/|$)/;
+      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|comments|edit)(?:\/|$)/;
       if (!previewOnly && UIDIT_API.test(route)) {
         if (route === '/api/state') {
           return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd) });
@@ -281,6 +281,14 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
           const record = store.addComment(cwd, await readBody(req));
           hub.notify();
           return json(res, 200, { comment: record, session: store.readSession(cwd) });
+        }
+        const reply = route.match(/^\/api\/comments\/([^/]+)\/replies$/);
+        if (reply && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = store.addCommentReply(cwd, decodeURIComponent(reply[1]), { text: body.text, author: 'reviewer', source: 'reviewer' });
+          if (!result) return json(res, 404, { error: 'comment not found' });
+          hub.notify();
+          return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
         if (route === '/api/edit' && req.method === 'POST') {
           const record = store.addEdit(cwd, await readBody(req));

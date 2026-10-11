@@ -153,7 +153,7 @@ test('redirects stay inside the proxy so the overlay survives', async () => {
   assert.match(res.headers.get('location'), /^\/proxy\/app\//);
 });
 
-test('CSP, ETag and cookie domains that would break the overlay are dropped', async () => {
+test('CSP is extended for the overlay while stale validators and cookie domains are removed', async () => {
   const { server, port } = await hostileServer((req, res) => {
     res.writeHead(200, {
       'content-type': 'text/html',
@@ -168,7 +168,10 @@ test('CSP, ETag and cookie domains that would break the overlay are dropped', as
   const body = await res.text();
   server.close();
   assert.equal(res.headers.get('etag'), null);
-  assert.equal(res.headers.get('content-security-policy'), null);
+  const csp = res.headers.get('content-security-policy');
+  assert.match(csp, /script-src 'self'/);
+  assert.match(csp, /style-src-attr 'unsafe-inline'/);
+  assert.match(csp, /frame-src 'self' http:\/\/127\.0\.0\.1:/);
   assert.equal(res.headers.get('set-cookie'), 'sid=1; Path=/');
   assert.match(body, /overlay\.js/);
 });

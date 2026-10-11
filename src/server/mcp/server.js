@@ -72,19 +72,25 @@ function makeMcp({ cwd, processManager, hub }) {
   const resource = (name, uri, description, get) => server.registerResource(name, uri, { description }, async () => ({ contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(get()) }] }));
   resource('context', 'uidit://project/context', 'Project identity, revision, selection, feedback counts, and dev state', snapshot);
   resource('session', 'uidit://session', 'Current shared feedback, visual drawing annotations (normalized page coordinates), and preview edits', () => store.readSession(cwd));
-  resource('open-feedback', 'uidit://feedback/open', 'Unresolved review comments, including visual arrow and shape annotations', () => store.readSession(cwd).comments.filter((comment) => !comment.resolved));
+  resource('open-feedback', 'uidit://feedback/open', 'Unresolved review comments, their marker locations, replies, and visual arrow or shape annotations', () => store.readSession(cwd).comments.filter((comment) => !comment.resolved));
   resource('selected-element', 'uidit://elements/selected', 'Most recently selected live element', () => hub.selection);
   resource('pending-edits', 'uidit://edits/pending', 'Preview edits not yet applied to source', () => store.readSession(cwd).edits.filter((edit) => !edit.applied));
   resource('dev-status', 'uidit://dev/status', 'Development process state and URL', () => processManager.status());
   resource('dev-logs', 'uidit://dev/logs', 'Recent redacted development logs', () => processManager.logs());
   server.registerTool('uidit_get_context', { description: 'Get UIDIT project, review revision, selected element, capabilities, and dev status', inputSchema: {} }, async () => result(snapshot()));
-  server.registerTool('uidit_list_feedback', { description: 'List review comments and their visual drawing instructions. Drawing points are normalized page coordinates; arrows run from first point to last.', inputSchema: { resolved: z.boolean().optional(), page: z.string().max(2000).optional(), elementId: z.string().max(200).optional(), query: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } }, async ({ resolved, page, elementId, query, offset = 0, limit = 50 }) => {
-    const all = store.readSession(cwd).comments.filter((c) => resolved === undefined || Boolean(c.resolved) === resolved).filter((c) => !page || c.page === page).filter((c) => !elementId || c.elementId === elementId).filter((c) => !query || c.text.toLowerCase().includes(query.toLowerCase()));
+  server.registerTool('uidit_list_feedback', { description: 'List review comments, replies, marker locations, and visual drawing instructions. Drawing points are normalized page coordinates; arrows run from first point to last.', inputSchema: { resolved: z.boolean().optional(), page: z.string().max(2000).optional(), elementId: z.string().max(200).optional(), query: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } }, async ({ resolved, page, elementId, query, offset = 0, limit = 50 }) => {
+    const all = store.readSession(cwd).comments.filter((c) => resolved === undefined || Boolean(c.resolved) === resolved).filter((c) => !page || c.page === page).filter((c) => !elementId || c.elementId === elementId).filter((c) => !query || c.text.toLowerCase().includes(query.toLowerCase()) || c.replies.some((reply) => reply.text.toLowerCase().includes(query.toLowerCase())));
     return result({ comments: all.slice(offset, offset + limit), offset, limit, total: all.length });
   });
   server.registerTool('uidit_add_comment', { description: 'Add page or element feedback to the shared review session', inputSchema: { text: z.string().min(1).max(4000), page: z.string().max(2000).optional(), elementId: z.string().max(200).nullable().optional() } }, async (args) => {
     if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
     const comment = store.addComment(cwd, { ...args, source: 'agent' }); hub.notify(); return result({ comment });
+  });
+  server.registerTool('uidit_reply_comment', { description: 'Reply to a review comment, including an agent reaction or clarifying question. Replies appear in the shared comment thread and on its page marker.', inputSchema: { id: z.string().min(1).max(200), text: z.string().min(1).max(4000) } }, async ({ id, text }) => {
+    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    const reply = store.addCommentReply(cwd, id, { text, author: 'agent', source: 'agent' });
+    if (!reply) throw new Error('comment not found');
+    hub.notify(); return result(reply);
   });
   server.registerTool('uidit_update_comment', { description: 'Edit or resolve/reopen a comment using an expected session revision', inputSchema: { id: z.string(), text: z.string().max(4000).optional(), resolved: z.boolean().optional(), expectedRevision: z.number().int().nonnegative().optional() } }, async ({ id, expectedRevision, ...patch }) => {
     if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
@@ -256,6 +262,13 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
       }
       if (route === '/api/element' && req.method === 'POST') { const record = store.upsertElement(cwd, await readJson(req)); hub.notify(); return sendJson(res, 200, { element: record, session: store.readSession(cwd) }); }
       if (route === '/api/comment' && req.method === 'POST') { const record = store.addComment(cwd, await readJson(req)); hub.notify(); return sendJson(res, 200, { comment: record, session: store.readSession(cwd) }); }
+      const reply = route.match(/^\/api\/comments\/([^/]+)\/replies$/);
+      if (reply && req.method === 'POST') {
+        const body = await readJson(req);
+        const threadReply = store.addCommentReply(cwd, decodeURIComponent(reply[1]), { text: body.text, author: 'reviewer', source: 'reviewer' });
+        if (!threadReply) return sendJson(res, 404, { error: 'comment not found' });
+        hub.notify(); return sendJson(res, 200, { ...threadReply, session: store.readSession(cwd) });
+      }
       if (route === '/api/edit' && req.method === 'POST') { const record = store.addEdit(cwd, await readJson(req)); hub.notify(); return sendJson(res, 200, { edit: record, session: store.readSession(cwd) }); }
       const match = route.match(/^\/api\/(comments|edits|elements)\/([^/]+)$/);
       if (match && req.method === 'PATCH') {

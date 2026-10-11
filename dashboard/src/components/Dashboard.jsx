@@ -6,7 +6,7 @@ import { useSession } from '../state/useSession.js';
 import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2 } from 'lucide-react';
 
 const TABS = [['feedback', 'Feedback', MessageSquareText], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
-const PREVIEW_API = new Set(['/element', '/comment', '/edit']);
+const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
 
 export default function Dashboard() {
   const { config, session, status: live, dev, mcp, selection, actions } = useSession();
@@ -47,6 +47,8 @@ export default function Dashboard() {
       body.text = body.text.trim();
       body.elementId = typeof body.elementId === 'string' ? body.elementId.slice(0, 200) : null;
       body.page = typeof body.page === 'string' ? body.page.slice(0, 2000) : null;
+      if (body.anchor && typeof body.anchor === 'object' && Number.isFinite(body.anchor.x) && Number.isFinite(body.anchor.y)) body.anchor = { x: Math.max(0, Math.min(1, body.anchor.x)), y: Math.max(0, Math.min(1, body.anchor.y)) };
+      else body.anchor = null;
       if (body.drawing && typeof body.drawing === 'object') {
         const { type, points } = body.drawing;
         if (!['arrow', 'rectangle', 'ellipse', 'freehand'].includes(type) || !Array.isArray(points) || points.length > 500 || points.some((point) => !Number.isFinite(point?.x) || !Number.isFinite(point?.y))) throw new Error('Invalid drawing annotation');
@@ -59,6 +61,10 @@ export default function Dashboard() {
       for (const key of ['selector', 'tag', 'page', 'text']) if (typeof body[key] === 'string') body[key] = body[key].slice(0, key === 'text' ? 300 : 2000);
       if (typeof body.selector !== 'string' || !body.selector) throw new Error('Element selector is required');
       return actions.element(body);
+    }
+    if (msg.route === '/comment-reply') {
+      if (typeof body.commentId !== 'string' || !body.commentId || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000) throw new Error('Reply text must be 1–4000 characters');
+      return actions.reply(body.commentId.slice(0, 200), { text: body.text.trim(), author: 'reviewer' });
     }
     if (!['text', 'style', 'attribute', 'class', 'remove'].includes(body.kind)) throw new Error('Unsupported preview edit');
     body.before = body.before == null ? null : String(body.before).slice(0, 2000);

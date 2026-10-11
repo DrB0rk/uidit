@@ -192,9 +192,11 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
   );
 }
 
-function CommentItem({ comment, element, onToggle, onUpdate, onSelect }) {
+function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(comment.text);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyText, setReplyText] = useState('');
   return (
     <li className={`item${comment.resolved ? ' resolved' : ''}`}>
       <div className="item-top">
@@ -216,6 +218,9 @@ function CommentItem({ comment, element, onToggle, onUpdate, onSelect }) {
         </span>
       </div>
       {editing ? <div className="edit-comment"><textarea aria-label="Edit comment" value={text} onChange={(ev) => setText(ev.target.value)} /><button className="btn sm primary" disabled={!text.trim()} onClick={async () => { await onUpdate(comment, text.trim()); setEditing(false); }}>Save note</button></div> : <div className="item-text">{comment.text}</div>}
+      {(comment.replies ?? []).map((reply) => <div className="comment-reply" key={reply.id}><strong>{reply.author === 'agent' ? 'Agent' : 'You'}</strong><span>{reply.text}</span></div>)}
+      <div className="reply-tools"><button type="button" className="btn sm ghost" onClick={() => setReplyOpen((open) => !open)}>{replyOpen ? 'Cancel reply' : 'Reply'}</button></div>
+      {replyOpen && <div className="edit-comment"><textarea aria-label="Reply to comment" value={replyText} onChange={(ev) => setReplyText(ev.target.value)} placeholder="Reply or ask the agent a question" /><button type="button" className="btn sm primary" disabled={!replyText.trim()} onClick={async () => { await onReply(comment, replyText.trim()); setReplyText(''); setReplyOpen(false); }}>Send reply</button></div>}
       {comment.drawing && <div className="annotation-chip"><span aria-hidden="true">{comment.drawing.type === 'arrow' ? '↗' : comment.drawing.type === 'rectangle' ? '▱' : comment.drawing.type === 'ellipse' ? '◯' : '〰'}</span>{comment.drawing.type} annotation</div>}
       <div className="item-meta">
         <span>{fmt(comment.createdAt)}</span>
@@ -348,6 +353,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
   });
   const drop = run((collection, id) => actions.remove(collection, id), 'Removed');
   const updateComment = run((comment, text) => actions.patch('comments', comment.id, { text }), 'Note updated');
+  const replyComment = run((comment, text) => actions.reply(comment.id, { text, author: 'reviewer' }), 'Reply added');
 
   const [filter, setFilter] = useState('open');
   const [query, setQuery] = useState('');
@@ -407,6 +413,7 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
                 element={session.elements.find((e) => e.id === c.elementId)}
                 onToggle={toggleComment}
                 onUpdate={updateComment}
+                onReply={replyComment}
                 onSelect={onSelect}
               />
             ))}

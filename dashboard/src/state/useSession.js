@@ -73,10 +73,11 @@ export function useSession() {
     setTargetUrl: (targetUrl) => req('/api/config', 'POST', { targetUrl }).then((d) => setConfig(d.config)),
     setConfig: (patch) => req('/api/config', 'POST', patch).then((d) => setConfig(d.config)),
     comment: (body) => req('/api/comment', 'POST', body),
+    reply: (commentId, body) => req(`/api/comments/${encodeURIComponent(commentId)}/replies`, 'POST', body),
     element: (body) => req('/api/element', 'POST', body),
     edit: (body) => req('/api/edit', 'POST', body),
     overlay: (route, method, body) => {
-      if (!['/element', '/comment', '/edit'].includes(route) || method !== 'POST') throw new Error('unsupported preview bridge request');
+      if (!['/element', '/comment', '/comment-reply', '/edit'].includes(route) || method !== 'POST') throw new Error('unsupported preview bridge request');
       return req(`/api${route}`, method, body);
     },
     patch: (collection, id, patchBody) => req(`/api/${collection}/${encodeURIComponent(id)}`, 'PATCH', patchBody),
