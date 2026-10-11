@@ -3,6 +3,7 @@
  * dev server, then asserts the .uidit/session.json the agent would read.
  */
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { server as fixture } from './fixtures/demo-site.js';
@@ -10,7 +11,17 @@ import { init } from '../src/server/store.js';
 
 const ROOT = '/tmp/uidit-e2e';
 const UIDIT = '/home/drb0rk/Projects/uidit';
-const DASH = 7801;
+let DASH;
+
+async function freePort() {
+  const s = net.createServer();
+  return new Promise((resolve) => {
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
 const FIXTURE_PORT = 4602;
 
 const { chromium: browser } = await import('playwright');
@@ -20,6 +31,7 @@ fs.mkdirSync(ROOT, { recursive: true });
 init(ROOT);
 
 fixture.listen(FIXTURE_PORT, '127.0.0.1');
+DASH = await freePort();
 const dash = spawn('node', [`${UIDIT}/bin/uidit.js`, 'start', String(DASH)], { cwd: ROOT, stdio: 'inherit' });
 await new Promise((r) => setTimeout(r, 1500));
 
@@ -34,10 +46,11 @@ try {
   const page = await b.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // uidit no longer guesses a target, so connect the way the dashboard does.
   await page.goto(`http://127.0.0.1:${DASH}/`);
-  await page.waitForSelector('iframe#preview.live', { timeout: 5000 }).catch(() => {});
   await page.fill('.target', `http://127.0.0.1:${FIXTURE_PORT}`);
   await page.click('button:has-text("Connect")');
+  await page.waitForSelector('iframe#preview.live', { timeout: 10000 });
 
   // The preview loads through the proxy and the overlay boots.
   await page.waitForFunction(() => document.querySelector('iframe#preview')?.contentWindow?.__uiditOverlay === true, { timeout: 8000 });

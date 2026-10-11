@@ -51,11 +51,13 @@ const commands = {
 
     const targets = await discoverTargets();
     if (targets.length) {
-      console.log(`\n  ${c.bold('Local servers found')}`);
+      console.log(`\n  ${c.bold('Local servers found')} ${c.dim('— pick one with Discover, or paste a URL')}`);
       for (const t of targets) console.log(`    ${c.accent(t.url)}${t.title ? c.dim(` — ${t.title}`) : ''}`);
+      // Deliberately no auto-target: the first listening port is often not a dev
+      // server (CUPS, Docker proxies), and silently previewing the wrong one is worse
+      // than making the user choose. Connecting in the dashboard persists the choice.
       if (!store.readConfig(cwd)?.targetUrl) {
-        store.writeConfig(cwd, { targetUrl: targets[0].url });
-        console.log(`\n  ${c.dim(`→ target set to ${targets[0].url}`)}`);
+        console.log(`\n  ${c.dim(`current target: none — pick one at ${url}`)}`);
       }
     } else {
       console.log(`\n  ${c.dim('No dev server detected. Start one, then paste its URL in the dashboard.')}`);

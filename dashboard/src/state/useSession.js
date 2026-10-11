@@ -44,7 +44,9 @@ export function useSession() {
       setStatus('live');
     });
     source.addEventListener('config', (ev) => {
-      if (!closed) setConfig(JSON.parse(ev.data));
+      if (closed) return;
+      const payload = JSON.parse(ev.data);
+      setConfig(payload.config ?? payload);
     });
     source.onerror = () => {
       if (!closed) {

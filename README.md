@@ -15,9 +15,15 @@ Then open <http://127.0.0.1:7717>.
 
 ## What it does
 
-- **Discover** — scans common dev-server ports (3000, 5173, 8080, …) and offers them,
-  or paste a URL manually. The page is proxied through uidit so the inspection overlay
-  can be injected into *any* framework, not just one with a plugin.
+- **Discover** — enumerates every port actually listening (via `ss`), probes both IPv4
+  and IPv6 loopback, and lists what answers with HTML. Any port works, not just the
+  popular ones; paste a URL if it doesn't show up. uidit never guesses a target for you,
+  because the first listening port is often CUPS or a Docker proxy, not your app.
+- **Works with any dev server** — the page is served through a proxy that injects the
+  overlay, and it handles what real stacks do: chunked and compressed HTML, root-absolute
+  asset URLs, `/`-redirects (rewritten to stay inside the proxy), hashed bundles, JSON APIs,
+  IPv6-only binds, HMR websockets, and CSP/ETag headers that would otherwise block or
+  bypass the injection.
 - **Tag** — click any element. uidit stores a CSS selector, class-based fallbacks, an
   ancestor chain, trimmed text, and the relevant attributes.
 - **Comment** — page-level or attached to a selected element.
