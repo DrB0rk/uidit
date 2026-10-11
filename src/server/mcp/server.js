@@ -182,7 +182,7 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
     try {
       const route = url.pathname;
       if (route === '/floating' && req.method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors http://127.0.0.1:${previewPort} http://localhost:${previewPort} http://[::1]:${previewPort}`, 'x-content-type-options': 'nosniff' });
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors http://127.0.0.1:${previewPort} http://localhost:${previewPort} http://127.0.0.1:${actualPort} http://localhost:${actualPort}`, 'x-content-type-options': 'nosniff' });
         return fs.createReadStream(FLOATING_HTML).pipe(res);
       }
       if (route === '/api/stream' && req.method === 'GET') {

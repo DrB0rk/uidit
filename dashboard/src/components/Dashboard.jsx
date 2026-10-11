@@ -13,9 +13,16 @@ export default function Dashboard() {
   const [mode, setMode] = useState('off');
   const [selected, setSelected] = useState(null);
   const [status, setStatus] = useState({ text: 'ready', kind: '' });
-  const [workspaceOpen, setWorkspaceOpen] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('workspace') === '1');
-  const [tab, setTab] = useState(() => typeof window === 'undefined' ? 'feedback' : new URLSearchParams(window.location.search).get('tab') || 'feedback');
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [tab, setTab] = useState('feedback');
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('workspace') === '1') setWorkspaceOpen(true);
+    const initialTab = params.get('tab');
+    if (TABS.some(([id]) => id === initialTab)) setTab(initialTab);
+  }, []);
 
   const targetUrl = config?.targetUrl ?? null;
   const previewOrigin = useMemo(() => { try { return new URL(config?.previewUrl).origin; } catch { return ''; } }, [config?.previewUrl]);

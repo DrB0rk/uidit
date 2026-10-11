@@ -51,7 +51,8 @@ export function useSession() {
     source.addEventListener('config', (ev) => {
       if (closed) return;
       const payload = JSON.parse(ev.data);
-      setConfig(payload.config ?? payload);
+      const next = payload.config ?? payload;
+      setConfig((current) => ({ ...next, previewUrl: next.previewUrl ?? current?.previewUrl ?? `http://127.0.0.1:${next.previewPort ?? 7717}` }));
     });
     source.addEventListener('dev', (ev) => { if (!closed) setDev(JSON.parse(ev.data)); });
     source.addEventListener('mcp', (ev) => { if (!closed) setMcp(JSON.parse(ev.data)); });
