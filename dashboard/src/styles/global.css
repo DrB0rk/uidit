@@ -533,7 +533,7 @@ kbd {
 .immersive { position: fixed; inset: 0; min-height: 100dvh; overflow: hidden; isolation: isolate; background: #f4f3ed; }
 .immersive.workspace-open { background: var(--surface); }
 .immersive-preview { position: absolute; inset: 12px; width: calc(100% - 24px); height: calc(100% - 24px); border: 1px solid #dedee7; border-radius: 18px; background: #f4f3ed; box-shadow: 0 12px 36px #17182220; }
-.immersive.workspace-open .immersive-preview { right: auto; width: calc(100% - min(420px, 100vw) - 12px); border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; transition: width .22s cubic-bezier(.2,.75,.24,1); }
+.immersive.workspace-open .immersive-preview { right: auto; width: calc(100% - min(420px, 100vw) - 12px); border-right: 0; border-top-right-radius: 18px; border-bottom-right-radius: 18px; transition: width .22s cubic-bezier(.2,.75,.24,1); }
 .immersive.workspace-open .immersive-empty { right: min(420px, 100vw); }
 .immersive-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--fg); text-align: center; }
 .immersive-empty h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
@@ -603,7 +603,7 @@ kbd {
 .edit-comment textarea { width: 100%; min-height: 62px; resize: vertical; }
 @media (max-width: 560px) {
   .immersive.workspace-open { display: flex; flex-direction: column; }
-  .immersive.workspace-open .immersive-preview { position: relative; inset: auto; width: calc(100% - 16px); height: calc(48dvh - 8px); margin: 8px 8px 0; border: 1px solid #dedee7; border-bottom: 0; border-radius: 14px 14px 0 0; flex: 0 0 calc(48dvh - 8px); }
+  .immersive.workspace-open .immersive-preview { position: relative; inset: auto; width: calc(100% - 16px); height: calc(48dvh - 8px); margin: 8px 8px 0; border: 1px solid #dedee7; border-bottom: 0; border-radius: 14px; flex: 0 0 calc(48dvh - 8px); }
   .immersive.workspace-open .immersive-empty { position: relative; inset: auto; min-height: 48dvh; flex: 0 0 48dvh; }
   .workspace-drawer { position: relative; inset: auto; width: 100%; height: 52dvh; flex: 1 1 52dvh; }
   .workspace-drawer .target { width: 100%; }
