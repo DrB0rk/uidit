@@ -21,6 +21,20 @@ const c = {
   bold: (s) => `\x1b[1m${s}\x1b[0m`,
 };
 
+const USAGE = `uidit — local UI review dashboard
+
+  uidit init              create .uidit/ in this project
+  uidit                   (same as: uidit start) run the dashboard
+  uidit [-- command...]   start a detected or explicit project dev server and review UI
+  uidit --attach <url>    attach to a local server without owning its process
+  uidit --no-start        legacy dashboard and manual discovery mode
+  uidit start [--port N]  run the dashboard
+  uidit mcp info          show local MCP endpoint and client setup
+  uidit mcp stdio         bridge a local stdio MCP client to the running instance
+  uidit status            print open feedback and pending edits
+  uidit resolve [ids…]    mark comments resolved (all open if no ids)
+  uidit build             rebuild the dashboard UI`;
+
 function dashboardBuilt() {
   return fs.existsSync(path.join(DIST, 'index.html'));
 }
@@ -34,6 +48,7 @@ function buildDashboard() {
 }
 
 const commands = {
+  help() { console.log(USAGE); },
   async init(cwd) {
     const { created, dir } = store.init(cwd);
     console.log(created ? `${c.accent('✓')} created ${c.bold(dir)}` : `${c.dim('•')} ${dir} already exists`);
@@ -172,26 +187,13 @@ const commands = {
 };
 
 const rawArgs = process.argv.slice(2);
-const command = rawArgs.length === 0 || rawArgs[0].startsWith('-') ? 'start' : rawArgs[0];
+const helpFlag = rawArgs[0] === '--help' || rawArgs[0] === '-h';
+const command = helpFlag ? 'help' : rawArgs.length === 0 || rawArgs[0].startsWith('-') ? 'start' : rawArgs[0];
 const argv = command === 'start' && rawArgs[0] !== 'start' ? rawArgs : rawArgs.slice(1);
 const cwd = process.cwd();
 
 if (!commands[command]) {
-  console.log(`uidit — local UI review dashboard
-
-  uidit init              create .uidit/ in this project
-  uidit                   (same as: uidit start) run the dashboard
-  uidit [-- command...]   start a detected or explicit project dev server and review UI
-  uidit --attach <url>    attach to a local server without owning its process
-  uidit --no-start        legacy dashboard and manual discovery mode
-  uidit start [--port N]  run the dashboard
-  uidit mcp info          show local MCP endpoint and client setup
-  uidit mcp stdio         bridge a local stdio MCP client to the running instance
-  uidit status            print open feedback and pending edits
-  uidit resolve [ids…]    mark comments resolved (all open if no ids)
-  uidit build             rebuild the dashboard UI
-
-Everything you tag, comment, or change is written to .uidit/session.json.`);
+  console.log(`${USAGE}\n\nEverything you tag, comment, or change is written to .uidit/session.json.`);
   process.exit(0);
 }
 

@@ -31,7 +31,7 @@
     "dev:dashboard": "astro dev --root dashboard",
     "prepare": "node bin/uidit.js build --if-needed",
     "start": "node bin/uidit.js start",
-    "test": "node --test test/unit.test.js test/proxy.test.js && node test/e2e.js && node test/stacks.js"
+    "test": "node --test test/unit.test.js test/proxy.test.js test/cli.test.js && node test/e2e.js && node test/stacks.js"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",
