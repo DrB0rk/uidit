@@ -5,7 +5,18 @@ dev server, click elements in the live page, leave comments, and try quick edits
 of it lands in `.uidit/` in your repo so a coding agent can pick the feedback up without
 you retyping it.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
+
+Needs Node 18+ and npm. The script checks for both, installs the `uidit` command, and
+verifies it runs before it exits. To install from a clone instead: `npm install -g .`
+
+## Use
+
+```sh
 uidit init     # once, creates .uidit/
 npm run dev     # your project's dev server, in another terminal
 uidit          # start the dashboard, auto-detects local dev servers
@@ -86,9 +97,10 @@ Built to the [b0x](https://skills.omp.sh) UI/UX baseline and verified against it
 - **Motion**: transform/opacity only, honouring `prefers-reduced-motion`.
 - **Responsive**: the panel stacks under the preview below 900px; nothing overflows.
 
-## Install
+## Development
 
-```
-npm install && npm link     # provides the `uidit` command
-npm test                    # end-to-end browser test (Playwright)
+```sh
+npm install && npm link   # provides the `uidit` command from this clone
+npm run build:dashboard   # build the UI (uidit does this on first run)
+npm test                  # unit, proxy, browser and cross-stack suites
 ```
