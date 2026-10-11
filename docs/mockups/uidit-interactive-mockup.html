@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UIDIT — in-page review concept</title>
+<style>
+  :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  * { box-sizing:border-box; }
+  html,body{margin:0;width:100%;height:100%;}
+  button,input,textarea{font:inherit;}
+  button{cursor:pointer;}
+  button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #a49afb;outline-offset:3px;}
+  #uidit-demo{--ink:#1e2220;--paper:#f8f7f2;--violet:#8778ea;--violet-bright:#b0a4ff;position:relative;width:100%;height:100dvh;min-height:580px;overflow:hidden;background:#f8f7f2;color:#202520;isolation:isolate;}
+  #uidit-demo .web-scroll{position:absolute;inset:0;overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain;}
+  #uidit-demo .site{min-height:100%;background:#f8f7f2;}
+  #uidit-demo .site nav{height:82px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(24px,5vw,88px);max-width:1470px;margin:auto;gap:20px;}
+  #uidit-demo .site-logo{font-size:24px;letter-spacing:-1.3px;font-weight:830;display:flex;align-items:center;gap:8px;}
+  #uidit-demo .site-logo::before{content:"";width:12px;height:12px;border-radius:2px 9px 2px 9px;background:#be6d46;transform:rotate(25deg);}
+  #uidit-demo .site-links{display:flex;align-items:center;gap:32px;font-size:12px;color:#5b615b;}
+  #uidit-demo .site-links button{border:0;background:none;color:inherit;padding:9px 0;}
+  #uidit-demo .site-links button:hover{text-decoration:underline;}
+  #uidit-demo .site-nav-cta{border:1px solid #31392f;border-radius:100px;background:#f8f7f2;padding:10px 16px;font-size:11px;font-weight:700;white-space:nowrap;}
+  #uidit-demo .hero{max-width:1470px;margin:auto;padding:45px clamp(24px,5vw,88px) 35px;display:grid;grid-template-columns:1.03fr .97fr;gap:clamp(26px,5vw,90px);align-items:center;}
+  #uidit-demo .eyebrow{display:flex;align-items:center;gap:10px;color:#6d716d;text-transform:uppercase;letter-spacing:2.1px;font-size:10px;font-weight:800;}
+  #uidit-demo .eyebrow::before{content:"";width:19px;height:1px;background:#af704f;}
+  #uidit-demo .hero h1{font-size:clamp(44px,5.8vw,84px);letter-spacing:-.066em;line-height:1.04;font-weight:640;margin:24px 0 24px;color:#1f2d27;max-width:730px;}
+  #uidit-demo .hero h1 em{font-style:normal;color:#af6946;}
+  #uidit-demo .hero-desc{max-width:390px;color:#666b65;font-size:15px;line-height:1.8;margin:0 0 27px;}
+  #uidit-demo .hero-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+  #uidit-demo .site-primary{background:#253a30;color:#fff;border:1px solid #253a30;border-radius:40px;padding:14px 21px;display:inline-flex;align-items:center;gap:16px;font-size:12px;font-weight:720;box-shadow:0 4px 0 #dbe1d8;}
+  #uidit-demo .site-primary:hover{background:#324f40;}
+  #uidit-demo .site-underlink{color:#565d55;background:transparent;border:0;border-bottom:1px solid #b6c0b8;padding:9px 0;font-size:12px;}
+  #uidit-demo .hero-caption{margin-top:47px;display:flex;gap:35px;color:#6e736a;font-size:10px;text-transform:uppercase;letter-spacing:1.1px;font-weight:750;}
+  #uidit-demo .hero-caption strong{display:block;color:#263c31;font-size:19px;text-transform:none;letter-spacing:-.6px;margin-top:4px;}
+  #uidit-demo .art{height:clamp(295px,35vw,450px);border-radius:2px;overflow:hidden;position:relative;background:#dfe6d6;box-shadow:14px 14px 0 #ebede3;}
+  #uidit-demo .art::before{content:"";position:absolute;width:67%;height:110%;left:14%;top:-13%;border-radius:50% 50% 11% 11%;background:#adbd9f;transform:rotate(-24deg);}
+  #uidit-demo .art::after{content:"";position:absolute;width:50%;height:84%;right:-9%;bottom:-35%;background:#b46d50;border-radius:50% 50% 0 0;transform:rotate(23deg);box-shadow:-80px -28px 0 -37px #e6c7ac;}
+  #uidit-demo .art-window{position:absolute;inset:9% 11% 0 28%;border:18px solid #f3e7d0;border-bottom:0;border-radius:155px 155px 0 0;z-index:1;transform:rotate(11deg);box-shadow:5px 8px 0 #a1afa0;}
+  #uidit-demo .art-orb{position:absolute;width:38%;aspect-ratio:1;background:#eecc91;border-radius:50%;left:9%;top:16%;z-index:2;mix-blend-mode:screen;opacity:.84;}
+  #uidit-demo .art-plate{position:absolute;z-index:3;left:20px;bottom:20px;display:flex;flex-direction:column;background:#f8f7f0e8;padding:15px 20px;border-radius:3px;min-width:150px;color:#243a30;}
+  #uidit-demo .art-plate small{font-size:9px;letter-spacing:1.5px;color:#7c8778;}
+  #uidit-demo .art-plate strong{font-weight:640;font-size:19px;letter-spacing:-.7px;margin-top:4px;}
+  #uidit-demo .section{max-width:1470px;margin:40px auto 0;padding:0 clamp(24px,5vw,88px) 75px;}
+  #uidit-demo .section-head{border-top:1px solid #d6d9d0;padding-top:23px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  #uidit-demo .section-head h2{font-size:20px;letter-spacing:-.7px;font-weight:670;margin:0;}
+  #uidit-demo .section-head span{font-size:11px;color:#888f87;}
+  #uidit-demo .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:19px;}
+  #uidit-demo .work-card{border:1px solid #dde0d8;background:#f1f0e9;padding:20px;min-height:156px;border-radius:2px;transition:transform .18s,background .18s;}
+  #uidit-demo .work-card:hover{transform:translateY(-3px);background:#edede4;}
+  #uidit-demo .work-card .number{font:650 10px ui-monospace,monospace;color:#a76c51;}
+  #uidit-demo .work-card h3{font-size:19px;letter-spacing:-.65px;margin:17px 0 8px;}
+  #uidit-demo .work-card p{font-size:12px;line-height:1.5;color:#7c8079;margin:0;max-width:240px;}
+  #uidit-demo .demo-badge{position:absolute;top:12px;left:12px;z-index:4;background:#f6f5f1db;color:#5e6561;border:1px solid #e6e6e1;border-radius:99px;padding:5px 10px;backdrop-filter:blur(8px);font-size:9px;letter-spacing:.7px;font-weight:700;text-transform:uppercase;pointer-events:none;}
+  /* In-page inspector is strictly scoped to the demo website. */
+  #uidit-demo.inspect-mode .site [data-inspectable]:hover{outline:2px solid #7a6af2!important;outline-offset:3px!important;cursor:crosshair!important;}
+  #uidit-demo .site [data-inspectable].uidit-selected{outline:2px solid #7768e8!important;outline-offset:4px!important;}
+  #uidit-demo .inspect-banner{position:absolute;z-index:31;top:13px;left:50%;transform:translateX(-50%);border:1px solid #3d3b56;border-radius:30px;background:#24232f;color:#eae9ff;padding:8px 11px;display:none;align-items:center;gap:9px;font-size:11px;box-shadow:0 9px 30px #1d1b3045;white-space:nowrap;}
+  #uidit-demo.inspect-mode .inspect-banner{display:flex;}
+  #uidit-demo .inspect-banner .ping{width:7px;height:7px;border-radius:50%;background:#b0a4ff;}
+  #uidit-demo .inspect-banner button{border:0;background:#45415d;color:#fff;border-radius:40px;padding:5px 10px;font-size:10px;margin-left:4px;}
+  /* UIDIT control's visual system: deliberately separate from the project UI. */
+  #uidit-demo .uidit{--u-bg:#1b1c23;--u-raise:#292a34;--u-hover:#333440;--u-edge:#41424e;--u-text:#f4f4f6;--u-muted:#a1a1b0;--u-faint:#777785;--u-purple:#a99cfb;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--u-text);letter-spacing:normal;}
+  #uidit-demo .fab{position:absolute;z-index:56;bottom:20px;right:20px;width:48px;height:48px;border-radius:17px;border:1px solid #4d486b;background:#282638;color:#f7f4ff;display:grid;place-items:center;box-shadow:0 5px 19px #0004,0 12px 35px #0002;transition:transform .18s,background .18s,right .2s,left .2s,opacity .18s;}
+  #uidit-demo .fab:hover{background:#37324b;transform:translateY(-2px);}
+  #uidit-demo .fab:active{transform:translateY(1px);}
+  #uidit-demo .fab svg{width:27px;height:27px;stroke:#b9acff;}
+  #uidit-demo .fab-count[hidden]{display:none!important;}
+  #uidit-demo .fab-count{position:absolute;top:-6px;right:-7px;background:#b6aaff;color:#171720;font-size:10px;font-weight:850;width:19px;height:19px;display:grid;place-items:center;border-radius:50%;border:2px solid #f8f7f2;}
+  #uidit-demo .action-menu{position:absolute;z-index:55;right:20px;bottom:80px;width:min(296px,calc(100vw - 32px));background:#1d1e26;border:1px solid #3c3b49;border-radius:15px;box-shadow:0 18px 68px #0005;transform-origin:bottom right;transition:transform .15s,opacity .15s;opacity:0;transform:translateY(7px) scale(.97);pointer-events:none;overflow:hidden;}
+  #uidit-demo.menu-open .action-menu{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+  #uidit-demo .menu-head{display:flex;align-items:center;justify-content:space-between;padding:16px 17px 13px;border-bottom:1px solid #353541;}
+  #uidit-demo .menu-head strong{display:block;font-size:15px;letter-spacing:-.45px;}
+  #uidit-demo .menu-head small{display:block;color:#9999a6;font-size:11px;margin-top:2px;}
+  #uidit-demo .u-live{display:flex;gap:6px;align-items:center;border-radius:16px;background:#264039;color:#a8e2c6;padding:5px 9px;font-size:10px;font-weight:660;}
+  #uidit-demo .u-dot{width:6px;height:6px;border-radius:50%;background:#86deb7;display:inline-block;flex:none;}
+  #uidit-demo .u-dot.off{background:#eaa595;}
+  #uidit-demo .menu-list{padding:7px;}
+  #uidit-demo .menu-row{border:0;background:transparent;color:#efeff5;display:flex;align-items:center;text-align:left;gap:11px;width:100%;min-height:51px;padding:7px 10px;border-radius:9px;}
+  #uidit-demo .menu-row:hover{background:#32313e;}
+  #uidit-demo .menu-row.active{background:#3a3454;}
+  #uidit-demo .menu-icon{width:31px;height:31px;display:grid;place-items:center;border:1px solid #484653;background:#30313b;border-radius:9px;flex:none;}
+  #uidit-demo .menu-icon svg{width:16px;height:16px;stroke:#d5d1ee;}
+  #uidit-demo .menu-label{display:block;font-weight:610;font-size:12px;}
+  #uidit-demo .menu-hint{font-size:10px;color:#9999a8;display:block;margin-top:2px;}
+  #uidit-demo .menu-key{margin-left:auto;font-size:10px;color:#8a899a;white-space:nowrap;}
+  #uidit-demo .menu-footer{padding:11px 16px;display:flex;align-items:center;gap:8px;border-top:1px solid #343540;background:#24242e;color:#b0afbb;font-size:10px;}
+  #uidit-demo .menu-footer strong{font-weight:650;color:#e8e4fb;}
+  #uidit-demo .menu-footer .spacer{flex:1;}
+  #uidit-demo .menu-footer button{border:0;background:none;color:#c1b6ff;font-size:10px;font-weight:650;}
+  #uidit-demo.left-control .fab{left:20px;right:auto;}
+  #uidit-demo.left-control .action-menu{left:20px;right:auto;transform-origin:bottom left;}
+  #uidit-demo.drawer-open .fab,#uidit-demo.drawer-open .action-menu{opacity:0;pointer-events:none;}
+  #uidit-demo .drawer{position:absolute;z-index:61;inset:0 0 0 auto;width:min(414px,100%);background:#1c1d25;color:#f2f2f5;border-left:1px solid #3a3945;box-shadow:-20px 0 75px #17182225;transform:translateX(102%);transition:transform .24s cubic-bezier(.2,.75,.24,1);display:flex;flex-direction:column;pointer-events:none;}
+  #uidit-demo.drawer-open .drawer{transform:translateX(0);pointer-events:auto;}
+  #uidit-demo .drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 21px 15px;border-bottom:1px solid #383943;}
+  #uidit-demo .drawer-brand{font-size:16px;letter-spacing:-.6px;font-weight:750;display:flex;align-items:center;gap:9px;}
+  #uidit-demo .drawer-brand svg{width:20px;height:20px;stroke:#ab9dff;}
+  #uidit-demo .drawer-sub{font-size:11px;color:#9b9ba9;margin-top:5px;}
+  #uidit-demo .round-icon{width:31px;height:31px;display:grid;place-items:center;background:#2c2d36;border:1px solid #464751;color:#d8d8e4;border-radius:9px;padding:0;}
+  #uidit-demo .round-icon:hover{background:#40414c;}
+  #uidit-demo .round-icon svg{width:15px;height:15px;stroke:currentColor;}
+  #uidit-demo .drawer-meta{display:flex;align-items:center;gap:6px;padding:12px 20px;border-bottom:1px solid #373844;font:11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#a7a6b7;}
+  #uidit-demo .drawer-meta .u-dot{margin-right:5px;}
+  #uidit-demo .drawer-meta .more{margin-left:auto;color:#86869a;}
+  #uidit-demo .tabstrip{display:flex;overflow:auto;scrollbar-width:none;padding:4px 10px 0;border-bottom:1px solid #363742;flex:none;}
+  #uidit-demo .tabstrip::-webkit-scrollbar{display:none;}
+  #uidit-demo .tab-btn{white-space:nowrap;color:#9b9ba8;border:0;background:transparent;padding:11px 10px;border-bottom:2px solid transparent;font-size:11px;font-weight:650;}
+  #uidit-demo .tab-btn:hover{color:#eeeaf8;}
+  #uidit-demo .tab-btn.active{color:#c6baff;border-bottom-color:#a99cfc;}
+  #uidit-demo .drawer-scroll{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:23px 20px 32px;scrollbar-color:#464553 transparent;}
+  #uidit-demo .drawer-foot{border-top:1px solid #373844;padding:12px 20px;color:#8c8c9b;display:flex;align-items:center;gap:7px;font-size:10px;}
+  #uidit-demo .drawer-foot b{color:#bcb1ff;font-weight:610;}
+  #uidit-demo .drawer-foot .flexgap{flex:1;}
+  #uidit-demo .panel-title{font-size:20px;font-weight:720;letter-spacing:-.7px;margin:0 0 7px;}
+  #uidit-demo .panel-copy{font-size:12px;line-height:1.6;color:#a9a9b5;margin:0 0 21px;}
+  #uidit-demo .u-actionbar{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  #uidit-demo .u-btn{background:#343442;border:1px solid #4c4b5b;color:#efeff4;padding:8px 11px;border-radius:8px;font-size:11px;font-weight:620;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:32px;}
+  #uidit-demo .u-btn svg{width:14px;height:14px;stroke:currentColor;flex:none;}
+  #uidit-demo .u-btn:hover{background:#444353;}
+  #uidit-demo .u-btn.primary{background:#8b7de8;border-color:#8b7de8;color:#13131b;font-weight:750;}
+  #uidit-demo .u-btn.primary:hover{background:#a395ff;}
+  #uidit-demo .u-btn.danger{color:#ffb2a8;border-color:#664b52;background:#372a30;}
+  #uidit-demo .u-btn:disabled{opacity:.45;cursor:not-allowed;}
+  #uidit-demo .u-btn.wide{width:100%;}
+  #uidit-demo .u-segment{display:inline-flex;padding:3px;background:#292a35;border:1px solid #3c3d4a;border-radius:9px;gap:2px;margin-bottom:16px;}
+  #uidit-demo .u-segment button{border:0;border-radius:6px;color:#a3a2b1;background:transparent;font-size:10px;font-weight:640;padding:7px 11px;}
+  #uidit-demo .u-segment button.active{background:#494454;color:#f2ebff;}
+  #uidit-demo .u-card{background:#24252f;border:1px solid #3a3a48;border-radius:10px;padding:13px 14px;margin-bottom:10px;}
+  #uidit-demo .u-card-head{display:flex;align-items:center;gap:7px;font-size:10px;color:#a8a7b6;margin-bottom:9px;}
+  #uidit-demo .u-card-head code,#uidit-demo .code-chip{font:10px ui-monospace,Consolas,monospace;color:#baafff;word-break:break-word;}
+  #uidit-demo .u-card-text{font-size:12px;line-height:1.62;color:#e3e2e9;margin:4px 0 13px;white-space:pre-wrap;}
+  #uidit-demo .u-card-foot{display:flex;gap:8px;align-items:center;color:#8f90a0;font-size:10px;}
+  #uidit-demo .u-card-foot .grow{flex:1;}
+  #uidit-demo .u-tag{font-size:9px;font-weight:750;padding:3px 7px;border-radius:14px;color:#bdb2fb;background:#383348;}
+  #uidit-demo .u-tag.ok{background:#294136;color:#98ddba;}
+  #uidit-demo .u-tag.critical{background:#4c3235;color:#ffc0a9;}
+  #uidit-demo .u-minilabel{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#9695a7;margin:18px 0 9px;display:block;}
+  #uidit-demo .u-input,#uidit-demo .u-textarea{width:100%;background:#13151c;color:#f1f1f5;border:1px solid #4c4b5a;border-radius:8px;padding:10px 11px;font-size:12px;line-height:1.5;min-height:37px;}
+  #uidit-demo .u-input::placeholder,#uidit-demo .u-textarea::placeholder{color:#777788;}
+  #uidit-demo .u-textarea{min-height:85px;resize:vertical;}
+  #uidit-demo .input-row{display:flex;gap:8px;align-items:center;margin-top:9px;}
+  #uidit-demo .input-row .u-input{min-width:0;}
+  #uidit-demo .u-help{font-size:11px;color:#9e9dab;line-height:1.6;}
+  #uidit-demo .u-empty{border:1px dashed #4a4858;border-radius:11px;text-align:center;padding:34px 16px;color:#a4a1b2;font-size:12px;line-height:1.65;}
+  #uidit-demo .u-empty strong{display:block;font-size:14px;color:#eee9f9;margin-bottom:4px;}
+  #uidit-demo .metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:19px;}
+  #uidit-demo .metric{background:#272834;border:1px solid #393a47;border-radius:10px;padding:11px 9px;text-align:center;}
+  #uidit-demo .metric strong{display:block;font-size:21px;letter-spacing:-.9px;}
+  #uidit-demo .metric small{font-size:9px;color:#9a9aab;}
+  #uidit-demo .dev-state{display:flex;align-items:center;gap:8px;font-size:12px;color:#e4e3eb;font-weight:680;}
+  #uidit-demo .mono-line{font:11px ui-monospace,Consolas,monospace;color:#b4b2c2;word-break:break-all;margin:12px 0 4px;}
+  #uidit-demo .log-console{font:10px/1.8 ui-monospace,Consolas,monospace;background:#111319;color:#a7c9b6;border:1px solid #363642;border-radius:8px;padding:12px;white-space:pre-wrap;min-height:110px;max-height:205px;overflow:auto;}
+  #uidit-demo .setting-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 0;border-bottom:1px solid #353641;}
+  #uidit-demo .setting-row strong{display:block;font-size:12px;color:#e6e4ed;}
+  #uidit-demo .setting-row small{display:block;font-size:10px;color:#9796a7;line-height:1.5;margin-top:4px;}
+  #uidit-demo .toggle{border:1px solid #535163;border-radius:100px;background:#363745;width:37px;height:22px;position:relative;flex:none;padding:0;}
+  #uidit-demo .toggle::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#c6c4d0;transition:transform .18s;}
+  #uidit-demo .toggle.on{background:#8d80ea;border-color:#8d80ea;}
+  #uidit-demo .toggle.on::after{background:#181822;transform:translateX(15px);}
+  #uidit-demo .toast{position:absolute;z-index:100;left:22px;bottom:24px;background:#22232c;color:#ebebf2;border:1px solid #434352;border-radius:9px;font-size:12px;padding:11px 15px;box-shadow:0 10px 28px #0005;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s;pointer-events:none;max-width:calc(100% - 45px);}
+  #uidit-demo .toast.show{opacity:1;transform:translateY(0);}
+  #uidit-demo .u-flex{display:flex;align-items:center;gap:8px;}
+  #uidit-demo .spacer{flex:1;}
+  #uidit-demo .u-rule{border:0;border-top:1px solid #3e3f4a;margin:22px 0;}
+  #uidit-demo .hint-row{display:flex;align-items:center;gap:6px;color:#bcb8d5;font-size:10px;margin:12px 0;}
+  #uidit-demo .hint-row kbd{background:#31313e;padding:2px 5px;border-radius:3px;color:#d4caff;}
+  @media(max-width:760px){
+    #uidit-demo .site nav{height:66px;padding:0 22px;}
+    #uidit-demo .site-links{gap:12px;}
+    #uidit-demo .site-links button{display:none;}
+    #uidit-demo .hero{grid-template-columns:1fr;padding:35px 25px;gap:30px;}
+    #uidit-demo .hero h1{font-size:clamp(43px,9vw,67px);}
+    #uidit-demo .art{height:245px;}
+    #uidit-demo .hero-caption{margin-top:28px;}
+    #uidit-demo .cards{grid-template-columns:1fr 1fr;}
+  }
+  @media(max-width:480px){
+    #uidit-demo .cards{grid-template-columns:1fr;}
+    #uidit-demo .site-nav-cta{display:none;}
+    #uidit-demo .section{margin-top:8px;}
+    #uidit-demo .drawer{width:100%;}
+    #uidit-demo .hero h1{font-size:44px;}
+  }
+  @media(prefers-reduced-motion:reduce){#uidit-demo *,#uidit-demo *::after{transition-duration:.01ms!important;scroll-behavior:auto!important;}}
+</style>
+</head>
+<body>
+<div id="uidit-demo">
+  <div class="web-scroll" id="webScroll">
+    <div class="site" id="site">
+      <nav>
+        <div class="site-logo" data-inspectable data-ref="header.site-logo">fieldwork.</div>
+        <div class="site-links"><button type="button" data-site="work">Work</button><button type="button" data-site="about">Approach</button><button type="button" data-site="work">Studio</button></div>
+        <button class="site-nav-cta" data-inspectable data-ref="header.contact-button" type="button">Let's talk ↗</button>
+      </nav>
+      <section class="hero">
+        <div>
+          <div class="eyebrow" data-inspectable data-ref="section.hero .eyebrow">Independent creative engineering</div>
+          <h1 data-inspectable data-ref="section.hero h1">Good ideas deserve <em>great execution.</em></h1>
+          <p class="hero-desc" data-inspectable data-ref="section.hero .intro">We combine design, engineering and a little curiosity to build digital things that feel different.</p>
+          <div class="hero-actions"><button class="site-primary" data-inspectable data-ref="section.hero .site-primary" data-site="work" type="button">Explore our work <span aria-hidden="true">↗</span></button><button class="site-underlink" data-site="about" data-inspectable data-ref="section.hero .site-underlink">How we work</button></div>
+          <div class="hero-caption"><span>Independent studio<strong>Amsterdam / Remote</strong></span><span>Projects shipped<strong>28+</strong></span></div>
+        </div>
+        <div class="art" data-inspectable data-ref="section.hero .art"><div class="art-window"></div><div class="art-orb"></div><div class="art-plate"><small>WORK / 2026</small><strong>Spaces to think.</strong></div></div>
+      </section>
+      <section class="section" id="work">
+        <div class="section-head"><h2 data-inspectable data-ref="section.work h2">What we're good at.</h2><span>01 — 03 / Services</span></div>
+        <div class="cards" data-inspectable data-ref="section.work .cards"><article class="work-card" data-inspectable data-ref="section.work .strategy"><span class="number">01 / DISCOVER</span><h3>Product strategy</h3><p>From early thought to a plan that makes sense.</p></article><article class="work-card" data-inspectable data-ref="section.work .design"><span class="number">02 / SHAPE</span><h3>Digital design</h3><p>Human interfaces with purpose and personality.</p></article><article class="work-card" data-inspectable data-ref="section.work .engineering"><span class="number">03 / BUILD</span><h3>Engineering</h3><p>Fast, resilient software, thoughtfully delivered.</p></article></div>
+      </section>
+    </div>
+  </div>
+  <div class="inspect-banner uidit"><span class="ping"></span> Inspect mode · click an element <button type="button" data-action="exit-inspect">Done</button></div>
+  <div class="action-menu uidit" id="actionMenu" role="menu" aria-label="UIDIT quick actions">
+    <div class="menu-head"><div><strong>uidit</strong><small>Review your running app</small></div><span class="u-live" id="menuLive"><span class="u-dot"></span> Connected</span></div>
+    <div class="menu-list" id="menuList"></div>
+    <div class="menu-footer"><span class="u-dot"></span><strong id="menuMcp">MCP · 2 agents</strong><span class="spacer"></span><button type="button" data-action="agents">Manage →</button></div>
+  </div>
+  <button class="fab uidit" id="fab" type="button" aria-label="Toggle UIDIT quick actions" aria-expanded="true" title="UIDIT review actions"><svg viewBox="0 0 32 32" fill="none" stroke-width="3.6" stroke-linecap="round"><path d="M7 8v12a8 8 0 0 0 16 0V8"/><path d="M24.5 8v5"/></svg><span class="fab-count" id="fabCount">2</span></button>
+  <aside class="drawer uidit" id="drawer" aria-label="UIDIT review workspace" aria-hidden="true">
+    <div class="drawer-head"><div><div class="drawer-brand"><svg viewBox="0 0 32 32" fill="none" stroke-width="3.4" stroke-linecap="round"><path d="M7 8v12a8 8 0 0 0 16 0V8"/><path d="M24.5 8v5"/></svg> uidit <span style="font-size:10px;font-weight:500;color:#9291a3;padding-left:5px">WORKSPACE</span></div><div class="drawer-sub">Fieldwork demo · local development</div></div><button class="round-icon" type="button" data-action="close-drawer" title="Close workspace" aria-label="Close workspace"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.7"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div>
+    <div class="drawer-meta"><span class="u-dot" id="drawerDot"></span><span id="drawerServerStatus">Server running</span><span class="more">localhost:5173</span></div>
+    <div class="tabstrip" role="tablist" id="tabstrip"></div>
+    <div class="drawer-scroll" id="panelContent"></div>
+    <div class="drawer-foot"><span class="u-dot"></span><span>Local · Live session</span><span class="flexgap"></span><span id="footMcp">2 MCP clients</span><b>UIDIT</b></div>
+  </aside>
+  <div class="toast uidit" id="toast" role="status" aria-live="polite"></div>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('uidit-demo');
+  const $ = (sel) => root.querySelector(sel);
+  const $$ = (sel) => [...root.querySelectorAll(sel)];
+  const escapeHTML = (x) => String(x ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const icons = {
+    cursor: '<path d="m5 3 13 8-6 1 3 7-3 1-3-7-4 4z"/>',
+    comment: '<path d="M4 5h16v12H8l-4 3z"/><path d="M8 9h8M8 12h6"/>',
+    edit: '<path d="m4 17 13-13 3 3-13 13-4 1zM15 6l3 3"/>',
+    panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18M6 7h6M6 11h6"/>',
+    terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 16h5"/>',
+    bolt: '<path d="M13 2 5 13h7l-1 9 8-11h-7z"/>',
+    play: '<path d="m8 5 11 7-11 7z"/>',
+    check: '<path d="m4 12 5 5L20 6"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    arrow: '<path d="M4 12h16M14 6l6 6-6 6"/>',
+    hide: '<path d="M3 3l18 18M10 6c5-1 9 2 12 6a15 15 0 0 1-4 4M6 6a15 15 0 0 0-4 6c4 6 13 9 18 2"/>',
+  };
+  const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.bolt}</svg>`;
+  const state = {
+    menu: true, drawer: false, tab: 'feedback', inspect: false, position: 'right', server:'running', command:'pnpm run dev', feedFilter:'open', compose:false, composeTarget:null, selected:null, edits:[{id:'e1',element:'section.hero .site-primary',before:'12px',after:'16px',kind:'padding',applied:false}],
+    comments:[{id:'c1',selector:'section.hero .site-primary',text:'Give this button a little more breathing room on small screens.',author:'You',time:'2 min ago',resolved:false},{id:'c2',selector:'section.work .cards',text:'These cards should stack a little earlier on tablets.',author:'OMP',time:'Just now',resolved:false},{id:'c3',selector:'section.hero h1',text:'Nice hierarchy. Keep this heading treatment.',author:'You',time:'Yesterday',resolved:true}],
+    agentWrite:true, agentDevControl:false, activity:['OMP read 2 open comments','Claude Code subscribed to changes'],logs:['[ready] pnpm run dev','[vite] Local: http://localhost:5173/','[uidit] Preview ready, 2 agent clients connected']
+  };
+  let toastTimer=null;
+  const notify=(message)=>{const el=$('#toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2900);};
+  const openComments=()=>state.comments.filter(c=>!c.resolved).length;
+  const markActivity=(text)=>{state.activity.unshift(text);state.activity=state.activity.slice(0,8);};
+  const log=(text)=>{state.logs.push(text);state.logs=state.logs.slice(-15);};
+  function menuRow(action,ico,label,hint,key){return `<button type="button" role="menuitem" class="menu-row ${action==='inspect'&&state.inspect?'active':''}" data-action="${action}"><span class="menu-icon">${svg(ico)}</span><span><span class="menu-label">${label}</span><span class="menu-hint">${hint}</span></span><span class="menu-key">${key??''}</span></button>`;}
+  function renderMenu(){
+    const run=state.server==='running';
+    $('#menuLive').innerHTML=`<span class="u-dot ${run?'':'off'}"></span> ${run?'Connected':state.server==='starting'?'Starting':'Offline'}`;
+    $('#menuList').innerHTML=[
+      menuRow('inspect','cursor',state.inspect?'Exit inspect mode':'Inspect element',state.inspect?'Click Done to resume using app':'Pick anything on the page','I'),
+      menuRow('comment','comment','Leave a comment','On this page or selected element','C'),
+      menuRow('quick-edit','edit','Quick edit','Try text and CSS changes',''),
+      menuRow('workspace','panel','Open workspace',`${openComments()} open comments · ${state.edits.length} edits`,'G'),
+      menuRow('server','terminal','Development server',`${state.server==='running'?'Running':state.server} · ${escapeHTML(state.command)}`,'')
+    ].join('');
+    $('#fabCount').textContent=openComments();$('#fabCount').hidden=openComments()===0;
+    $('#fab').setAttribute('aria-expanded',String(state.menu));
+    $('#menuMcp').textContent='MCP · 2 agents';
+  }
+  const tabs=[['feedback','Feedback'],['inspect','Inspect'],['changes','Changes'],['server','Server'],['agents','Agents'],['settings','Settings']];
+  const cardTop=(title,desc)=>`<h2 class="panel-title">${title}</h2><p class="panel-copy">${desc}</p>`;
+  const selectedText=()=>state.selected?state.selected.el.textContent.trim().replace(/\s+/g,' ').slice(0,140):'';
+  function renderFeedback(){
+    const list=state.comments.filter(c=>state.feedFilter==='all'||(state.feedFilter==='resolved'?c.resolved:!c.resolved));
+    return `${cardTop('Feedback','Notes stay linked to the real element and are immediately visible to your coding agents.')}
+      <div class="metric-row"><div class="metric"><strong>${openComments()}</strong><small>Open notes</small></div><div class="metric"><strong>${state.comments.length-openComments()}</strong><small>Resolved</small></div><div class="metric"><strong>${state.edits.filter(e=>!e.applied).length}</strong><small>Pending edits</small></div></div>
+      <div class="u-actionbar"><div class="u-segment" style="margin:0">${['open','all','resolved'].map(s=>`<button type="button" class="${state.feedFilter===s?'active':''}" data-filter="${s}">${s[0].toUpperCase()+s.slice(1)}</button>`).join('')}</div><button type="button" class="u-btn primary" data-action="new-note">+ Note</button></div>
+      ${state.compose?`<div class="u-card" style="border-color:#7f75ba"><div class="u-card-head">NEW COMMENT · ${state.composeTarget?`<code>${escapeHTML(state.composeTarget)}</code>`:'Page-level note'}</div><textarea id="noteText" class="u-textarea" placeholder="What needs to change?" aria-label="New comment"></textarea><div class="input-row"><button class="u-btn primary" type="button" data-action="save-note">Save comment</button><button class="u-btn" type="button" data-action="cancel-note">Cancel</button></div></div>`:''}
+      ${list.length?list.map(c=>`<article class="u-card"><div class="u-card-head"><span class="u-tag ${c.resolved?'ok':''}">${c.resolved?'Resolved':'Open'}</span><code>${escapeHTML(c.selector||'Page-level note')}</code></div><div class="u-card-text">${escapeHTML(c.text)}</div><div class="u-card-foot"><span>${escapeHTML(c.author)} · ${c.time}</span><span class="grow"></span>${c.selector?`<button type="button" class="u-btn" data-focus="${escapeHTML(c.selector)}">Find</button>`:''}<button type="button" class="u-btn" data-comment="${c.id}">${c.resolved?'Reopen':'Resolve'}</button></div></article>`).join(''):'<div class="u-empty">No comments match this filter.</div>'}
+      <button type="button" class="u-btn wide" data-action="export" style="margin-top:8px">${svg('copy')} Copy feedback as Markdown</button>`;
+  }
+  function renderInspect(){
+    if(!state.selected)return `${cardTop('Element inspector','Select something on the page to inspect its details, create notes or preview changes.')}
+      <div class="u-empty"><strong>No element selected</strong>Turn on inspect mode, then click any heading, button, card or image on the preview.</div><button class="u-btn primary wide" type="button" data-action="inspect">${svg('cursor')} ${state.inspect?'Exit inspect mode':'Start inspecting'}</button><div class="hint-row">Use <kbd>I</kbd> as a keyboard shortcut.</div>`;
+    return `${cardTop('Element inspector','Modify the live preview without touching your application source code.')}
+      <div class="u-card"><div class="u-card-head"><span class="u-tag">SELECTED</span><code>${escapeHTML(state.selected.selector)}</code></div><div class="u-card-text">${escapeHTML(selectedText())}</div><div class="u-card-foot"><span>DOM element</span><span class="grow"></span><button class="u-btn" type="button" data-action="clear-selection">Clear</button></div></div>
+      <label for="editText" class="u-minilabel">Preview text replacement</label><textarea id="editText" class="u-textarea" aria-label="Edited text">${escapeHTML(selectedText())}</textarea><button class="u-btn primary" data-action="apply-text" type="button" style="margin-top:8px">Preview text edit</button>
+      <label class="u-minilabel" for="paddingValue">CSS property · padding</label><div class="input-row"><input id="paddingValue" class="u-input" value="16px" aria-label="Preview padding CSS value"/><button type="button" class="u-btn" data-action="apply-padding">Apply preview</button></div>
+      <p class="u-help">Preview edits are captured as before → after records. A coding agent can apply them to source through MCP.</p>
+      <hr class="u-rule"/><button type="button" class="u-btn wide" data-action="selected-note">${svg('comment')} Comment on selected element</button>`;
+  }
+  function renderChanges(){return `${cardTop('Changes','Changes you previewed in the browser. Mark an edit applied only after updating the actual source.')}
+      ${state.edits.length?state.edits.map(e=>`<div class="u-card"><div class="u-card-head"><span class="u-tag ${e.applied?'ok':''}">${e.applied?'Applied in source':'Pending source edit'}</span><code>${escapeHTML(e.element)}</code></div><div class="u-card-text"><b>${escapeHTML(e.kind)}</b></div><div class="u-card-foot" style="align-items:flex-start;flex-direction:column"><span style="color:#df999c;text-decoration:line-through">${escapeHTML(e.before)}</span><span style="color:#a7ddc0">→ ${escapeHTML(e.after)}</span></div><div class="input-row"><button type="button" class="u-btn" data-edit="${e.id}">${e.applied?'Mark pending':'Mark applied in source'}</button></div></div>`).join(''):'<div class="u-empty">No preview changes yet.</div>'}`;}
+  function renderServer(){return `${cardTop('Development server','UIDIT launches and supervises the project command. No separate npm, Vite or Bun terminal required.')}
+      <div class="u-card"><div class="u-actionbar" style="margin:0"><div class="dev-state"><span class="u-dot ${state.server==='running'?'':'off'}"></span>${state.server[0].toUpperCase()+state.server.slice(1)}</div><span class="u-tag ${state.server==='running'?'ok':'critical'}">Managed process</span></div><div class="mono-line">http://127.0.0.1:5173/</div><div class="u-help">UIDIT preview: http://127.0.0.1:7717/</div></div>
+      <label class="u-minilabel" for="devCommand">Project development command</label><input id="devCommand" class="u-input" value="${escapeHTML(state.command)}" aria-label="Development command" /><div class="input-row"><button class="u-btn" type="button" data-action="save-command">Save command</button><button class="u-btn ${state.server==='running'?'danger':'primary'}" type="button" data-action="${state.server==='running'?'stop':'start'}">${state.server==='running'?'Stop server':'Start server'}</button><button class="u-btn" type="button" data-action="restart">Restart</button></div>
+      <label class="u-minilabel">Output · last 15 lines</label><div class="log-console">${escapeHTML(state.logs.join('\n'))}</div><p class="u-help">This mockup simulates the process lifecycle. The implementation will manage the real child process and collect real output.</p>`;}
+  function renderAgents(){return `${cardTop('Local MCP server','Agents read feedback and subscribe to live resource updates. No repetitive polling of session files.')}
+      <div class="u-card"><div class="u-actionbar" style="margin:0"><div class="dev-state"><span class="u-dot"></span>MCP online</div><span class="u-tag ok">2 connected</span></div><div class="mono-line">http://127.0.0.1:7718/mcp</div><div class="u-help">Streamable HTTP · stdio bridge available</div><button class="u-btn" style="margin-top:12px" type="button" data-action="copy-mcp">${svg('copy')} Copy client config</button></div>
+      <span class="u-minilabel">Connected agents</span><div class="u-card"><div class="u-actionbar" style="margin:0"><span style="font-size:12px;font-weight:680">OMP / coding agent</span><span class="u-tag ok">Subscribed</span></div><p class="u-help" style="margin:6px 0 0">Feedback, selections, edits, server status</p></div><div class="u-card"><div class="u-actionbar" style="margin:0"><span style="font-size:12px;font-weight:680">Claude Code</span><span class="u-tag ok">Subscribed</span></div><p class="u-help" style="margin:6px 0 0">Read and feedback tools</p></div>
+      <span class="u-minilabel">Agent permissions</span><div class="setting-row"><div><strong>Write comments</strong><small>Agents can add and resolve feedback</small></div><button class="toggle ${state.agentWrite?'on':''}" type="button" data-action="toggle-write" aria-label="Toggle agent feedback writes" aria-pressed="${state.agentWrite}"></button></div><div class="setting-row"><div><strong>Control dev server</strong><small>Disabled by default for security</small></div><button class="toggle ${state.agentDevControl?'on':''}" type="button" data-action="toggle-dev" aria-label="Toggle agent process control" aria-pressed="${state.agentDevControl}"></button></div>
+      <span class="u-minilabel">Live agent activity (simulated)</span><div class="log-console">${escapeHTML(state.activity.join('\n'))}</div><button class="u-btn primary wide" style="margin-top:12px" type="button" data-action="agent-test">${svg('bolt')} Simulate agent comment</button><p class="u-help">The demo button writes a mock agent comment into Feedback immediately. The actual implementation uses MCP tools and subscriptions.</p>`;}
+  function renderSettings(){return `${cardTop('Preferences','Keep the controls out of the way until you need them.')}
+      <div class="setting-row"><div><strong>Floating control placement</strong><small>Current: bottom ${state.position}</small></div><button type="button" class="u-btn" data-action="toggle-position">Switch side</button></div><div class="setting-row"><div><strong>Inspect mode</strong><small>Intercept clicks only when active</small></div><button class="toggle ${state.inspect?'on':''}" data-action="inspect" type="button" aria-label="Toggle inspect mode" aria-pressed="${state.inspect}"></button></div><div class="setting-row"><div><strong>Keep controls minimal</strong><small>Only a 48px button until you open UIDIT</small></div><span class="u-tag ok">On</span></div>
+      <span class="u-minilabel">Keyboard shortcuts</span><div class="u-card"><div class="u-help" style="line-height:2.2">I — Toggle inspector<br/>C — Add comment<br/>G — Open workspace<br/>Esc — Close popover / drawer</div></div>
+      <button type="button" class="u-btn wide" data-action="hide-controls">Hide UIDIT controls</button><p class="u-help">In production the hidden state can be restored by a documented keyboard shortcut or review URL.</p>`;}
+  const panels={feedback:renderFeedback,inspect:renderInspect,changes:renderChanges,server:renderServer,agents:renderAgents,settings:renderSettings};
+  function renderPanel(){
+    $('#tabstrip').innerHTML=tabs.map(([id,name])=>`<button class="tab-btn ${state.tab===id?'active':''}" type="button" data-tab="${id}" role="tab" aria-selected="${state.tab===id}">${name}${id==='feedback'&&openComments()?` <span>${openComments()}</span>`:''}</button>`).join('');
+    $('#panelContent').innerHTML=panels[state.tab]();
+    $('#drawerDot').className=`u-dot ${state.server==='running'?'':'off'}`;
+    $('#drawerServerStatus').textContent=`Server ${state.server}`;
+  }
+  function render(){root.classList.toggle('menu-open',state.menu&&!state.drawer);root.classList.toggle('drawer-open',state.drawer);root.classList.toggle('inspect-mode',state.inspect);root.classList.toggle('left-control',state.position==='left');$('#drawer').setAttribute('aria-hidden',String(!state.drawer));$('#drawer').inert=!state.drawer;$('#actionMenu').inert=!(state.menu&&!state.drawer);renderMenu();renderPanel();}
+  function showDrawer(tab='feedback'){state.drawer=true;state.menu=false;state.tab=tab;render();}
+  function closeDrawer(){state.drawer=false;state.menu=false;render();$('#fab').focus();}
+  function setInspection(on){state.inspect=on;state.menu=false;render();notify(on?'Inspect active — click an element':'Inspect turned off');}
+  function startNote(selector=null){state.compose=true;state.composeTarget=selector;showDrawer('feedback');requestAnimationFrame(()=>$('#noteText')?.focus());}
+  function addComment(text,selector,author='You'){state.comments.unshift({id:`c${Date.now()}`,selector:selector||null,text,author,time:'Just now',resolved:false});markActivity(`${author} added a comment`);state.compose=false;state.feedFilter='open';render();notify('Comment saved · live review updated');}
+  function handleAction(action){switch(action){
+    case 'inspect':setInspection(!state.inspect);break;
+    case 'exit-inspect':setInspection(false);break;
+    case 'comment':case 'new-note':startNote(action==='comment'?null:state.selected?.selector||null);break;
+    case 'quick-edit':showDrawer('inspect');if(!state.selected){state.inspect=true;render();notify('Click an element to start editing');}break;
+    case 'workspace':showDrawer('feedback');break;
+    case 'server':showDrawer('server');break;
+    case 'agents':showDrawer('agents');break;
+    case 'close-drawer':closeDrawer();break;
+    case 'cancel-note':state.compose=false;render();break;
+    case 'save-note':{const el=$('#noteText');if(el&&el.value.trim())addComment(el.value.trim(),state.composeTarget);else notify('Write a comment first');break;}
+    case 'selected-note':startNote(state.selected?.selector||null);break;
+    case 'clear-selection':state.selected?.el.classList.remove('uidit-selected');state.selected=null;render();break;
+    case 'apply-text':{if(!state.selected)return;const el=$('#editText');if(!el)return;const before=selectedText(),after=el.value.trim();if(!after)return notify('Text cannot be empty in this demo');state.selected.el.textContent=after;state.edits.unshift({id:`e${Date.now()}`,element:state.selected.selector,kind:'text',before,after,applied:false});markActivity('User previewed text edit');render();notify('Text previewed · edit recorded');break;}
+    case 'apply-padding':{if(!state.selected)return;const el=$('#paddingValue'),after=el?.value.trim();if(!after)return;const before=state.selected.el.style.padding||'original';state.selected.el.style.padding=after;state.edits.unshift({id:`e${Date.now()}`,element:state.selected.selector,kind:'padding',before,after,applied:false});markActivity('User previewed padding edit');render();notify('Padding previewed · edit recorded');break;}
+    case 'save-command':{const cmd=$('#devCommand')?.value.trim();if(!cmd)return notify('Command cannot be empty');state.command=cmd;log(`[uidit] Command set: ${cmd}`);render();notify('Development command saved in demo');break;}
+    case 'stop':state.server='stopped';log('[uidit] Development server stopped');render();notify('Server stopped (simulation)');break;
+    case 'start':case 'restart':state.server='starting';log(`[uidit] ${action==='restart'?'Restarting':'Starting'}: ${state.command}`);render();notify('Starting server (simulation)');setTimeout(()=>{state.server='running';log('[ready] Listening on http://localhost:5173/');render();notify('Development server ready (simulation)');},750);break;
+    case 'copy-mcp':{if(!navigator.clipboard?.writeText){notify('Clipboard unavailable; config shown in plan');break;}const content=JSON.stringify({mcpServers:{uidit:{command:'uidit',args:['mcp','stdio']}}},null,2);navigator.clipboard?.writeText(content).then(()=>notify('MCP client configuration copied')).catch(()=>notify('Clipboard unavailable; config shown in plan'));break;}
+    case 'toggle-write':state.agentWrite=!state.agentWrite;render();notify(`Agent comment writes ${state.agentWrite?'allowed':'disabled'} (demo)`);break;
+    case 'toggle-dev':state.agentDevControl=!state.agentDevControl;render();notify(`Agent server controls ${state.agentDevControl?'allowed':'disabled'} (demo)`);break;
+    case 'agent-test':if(!state.agentWrite)return notify('Enable agent comment writes first');addComment('Please check the selected call-to-action alignment in compact view.','section.hero .site-primary','OMP');showDrawer('feedback');break;
+    case 'toggle-position':state.position=state.position==='right'?'left':'right';render();notify(`Button moved to bottom ${state.position}`);break;
+    case 'hide-controls':closeDrawer();notify('Mockup keeps button visible so you can reopen it');break;
+    case 'export':{if(!navigator.clipboard?.writeText){notify('Clipboard unavailable');break;}const content=['# UIDIT feedback',...state.comments.map(c=>`- ${c.resolved?'[x]':'[ ]'} ${c.selector||'Page'}: ${c.text}`)].join('\n');navigator.clipboard?.writeText(content).then(()=>notify('Feedback copied as Markdown')).catch(()=>notify('Clipboard unavailable'));break;}
+  }}
+  $('#fab').addEventListener('click',()=>{state.menu=!state.menu;state.drawer=false;render();});
+  root.addEventListener('click',(ev)=>{
+    const tab=ev.target.closest('[data-tab]');if(tab){state.tab=tab.dataset.tab;state.compose=false;render();return;}
+    const filter=ev.target.closest('[data-filter]');if(filter){state.feedFilter=filter.dataset.filter;render();return;}
+    const toggle=ev.target.closest('[data-comment]');if(toggle){const c=state.comments.find(c=>c.id===toggle.dataset.comment);if(c){c.resolved=!c.resolved;markActivity(`Comment ${c.resolved?'resolved':'reopened'}`);render();notify(c.resolved?'Comment resolved':'Comment reopened');}return;}
+    const mark=ev.target.closest('[data-edit]');if(mark){const e=state.edits.find(e=>e.id===mark.dataset.edit);if(e){e.applied=!e.applied;render();notify(e.applied?'Edit marked applied in source (demo)':'Edit marked pending');}return;}
+    const focus=ev.target.closest('[data-focus]');if(focus){const match=$$('[data-inspectable]').find(el=>el.dataset.ref===focus.dataset.focus);if(match){if(state.selected?.el)state.selected.el.classList.remove('uidit-selected');state.selected={selector:match.dataset.ref,el:match};match.classList.add('uidit-selected');$('#webScroll').scrollTo({top:Math.max(match.getBoundingClientRect().top+$('#webScroll').scrollTop-130,0),behavior:'smooth'});state.tab='inspect';render();}return;}
+    const action=ev.target.closest('[data-action]');if(action){handleAction(action.dataset.action);return;}
+    const nav=ev.target.closest('[data-site]');if(nav&&(!state.inspect)){if(nav.dataset.site==='work')$('#work').scrollIntoView({behavior:'smooth',block:'start'});else notify('Sample website navigation');}
+  });
+  $('#site').addEventListener('click',(ev)=>{
+    if(!state.inspect)return;
+    const target=ev.target.closest('[data-inspectable]');if(!target)return;
+    ev.preventDefault();ev.stopPropagation();
+    if(state.selected?.el)state.selected.el.classList.remove('uidit-selected');
+    state.selected={selector:target.dataset.ref,el:target};target.classList.add('uidit-selected');state.inspect=false;showDrawer('inspect');notify(`Selected ${state.selected.selector}`);
+  },true);
+  root.addEventListener('keydown',(ev)=>{
+    if(ev.key==='Escape'){if(state.drawer)closeDrawer();else if(state.menu){state.menu=false;render();}else if(state.inspect)setInspection(false);return;}
+    if(/INPUT|TEXTAREA/.test(document.activeElement?.tagName||''))return;
+    if(ev.altKey||ev.ctrlKey||ev.metaKey)return;
+    const key=ev.key.toLowerCase();if(key==='i')setInspection(!state.inspect);if(key==='g')showDrawer('feedback');if(key==='c')startNote(null);
+  });
+  render();
+})();
+</script>
+</body></html>
