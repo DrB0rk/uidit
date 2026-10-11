@@ -55,6 +55,19 @@ else
   installed="source"
 fi
 
+# npm >= 11 blocks dependency install scripts unless explicitly allowed, so the
+# dashboard UI may not have been built during install. Build it now — `uidit start`
+# would otherwise build on first launch and look broken meanwhile.
+UI_BUILT=""
+for d in "$(npm prefix -g)/lib/node_modules/uidit" "$(npm prefix -g)/node_modules/uidit"; do
+  [ -f "$d/dashboard/dist/index.html" ] && { UI_BUILT=1; break; }
+done
+
+if [ -z "$UI_BUILT" ]; then
+  say "  building the dashboard UI"
+  uidit build >/dev/null 2>&1 || warn "could not pre-build the UI; it will build on first run"
+fi
+
 command -v uidit >/dev/null 2>&1 || die "install completed but 'uidit' is not on PATH.
   Add your npm global bin to PATH:
     export PATH=\"\$PATH:\$(npm prefix -g)/bin\""
