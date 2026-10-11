@@ -58,9 +58,9 @@ function serveStatic(res, file, { injectOverlay = false } = {}) {
   res.end(body);
 }
 
-export function injectIntoHtml(html, targetOrigin = '') {
+export function injectIntoHtml(html, targetOrigin = '', controlOrigin = 'http://127.0.0.1:7718') {
   const tag = `<script src="/overlay.js" data-uidit="1"></script>` +
-    `<script>window.__UIDIT_TARGET__=${JSON.stringify(targetOrigin)}</script>`;
+    `<script>window.__UIDIT_TARGET__=${JSON.stringify(targetOrigin)};window.__UIDIT_CONTROL__=${JSON.stringify(controlOrigin)}</script>`;
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}\n${tag}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}\n<head>${tag}</head>`);
   return `${tag}\n${html}`;
@@ -137,7 +137,7 @@ function scrubHtmlHeaders(headers) {
  * stack-agnostic — no assumptions about the framework behind the target beyond
  * "it serves HTTP and returns HTML documents".
  */
-async function proxyRequest(req, res, target) {
+async function proxyRequest(req, res, target, controlOrigin) {
   const url = new URL(target.href);
   url.hostname = await resolveReachable(url);
   const client = url.protocol === 'https:' ? https : http;
@@ -170,7 +170,7 @@ async function proxyRequest(req, res, target) {
       const chunks = [];
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
-        const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), url.origin);
+        const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), url.origin, controlOrigin);
         const outHeaders = scrubHtmlHeaders({ ...headers, 'content-length': Buffer.byteLength(html) });
         res.writeHead(status, outHeaders);
         res.end(html);
@@ -184,7 +184,8 @@ async function proxyRequest(req, res, target) {
   req.pipe(upstream);
 }
 
-export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717 } = {}) {
+export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718 } = {}) {
+  const controlOrigin = `http://127.0.0.1:${controlPort}`;
   const server = http.createServer(async (req, res) => {
     // A browser aborting a request (navigation, closed tab) must not take down the
     // dashboard — without this, one ECONNRESET crashes the whole process.
@@ -279,7 +280,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         // uidit's own reload cache-buster is not part of the target's URL space.
         url.searchParams.delete('r');
         target.search = url.search;
-        return proxyRequest(req, res, target);
+        return proxyRequest(req, res, target, controlOrigin);
       }
 
       // The previewed page runs on uidit's origin, so its own URLs — root-absolute
@@ -290,7 +291,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         const target = safeTargetUrl(config.targetUrl);
         target.pathname = `${target.pathname.replace(/\/$/, '')}${route}`;
         target.search = url.search;
-        return proxyRequest(req, res, target);
+        return proxyRequest(req, res, target, controlOrigin);
       }
 
       return json(res, 404, { error: 'not found' });
@@ -306,10 +307,10 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
   return server;
 }
 
-export function startServer({ cwd = process.cwd(), port = 7717 } = {}) {
+export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718 } = {}) {
   const hub = createHub({ cwd });
   hub.watch();
-  const server = createServer({ cwd, hub, port });
+  const server = createServer({ cwd, hub, port, controlPort });
 
   // Hot reload runs over a websocket; without this the preview renders but never
   // refreshes when the user saves a file.
@@ -322,22 +323,27 @@ export function startServer({ cwd = process.cwd(), port = 7717 } = {}) {
     } catch {
       return socket.destroy();
     }
-    const upstream = http.request({
-      host: target.hostname,
-      port: target.port || 80,
-      path: req.url,
-      method: req.method,
-      headers: { ...req.headers, host: target.host },
-    });
-    upstream.on('upgrade', (upRes, upSocket, upHead) => {
-      const lines = Object.entries(upRes.headers).map(([k, v]) => `${k}: ${v}`);
-      socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`);
-      if (upHead?.length) socket.unshift(upHead);
-      if (head?.length) upSocket.unshift(head);
-      upSocket.pipe(socket).pipe(upSocket);
-    });
-    upstream.on('error', () => socket.destroy());
-    upstream.end();
+    (async () => {
+      const upstreamHost = await resolveReachable(target);
+      const client = target.protocol === 'https:' ? https : http;
+      const upstream = client.request({
+        host: upstreamHost,
+        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        path: req.url,
+        method: req.method,
+        headers: { ...req.headers, host: target.host },
+        rejectUnauthorized: false,
+      });
+      upstream.on('upgrade', (upRes, upSocket, upHead) => {
+        const lines = Object.entries(upRes.headers).map(([k, v]) => `${k}: ${v}`);
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`);
+        if (upHead?.length) socket.unshift(upHead);
+        if (head?.length) upSocket.unshift(head);
+        upSocket.pipe(socket).pipe(upSocket);
+      });
+      upstream.on('error', () => socket.destroy());
+      upstream.end();
+    })().catch(() => socket.destroy());
   });
 
   return new Promise((resolve, reject) => {

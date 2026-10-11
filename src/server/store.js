@@ -29,12 +29,7 @@ export function init(cwd = process.cwd(), { force = false } = {}) {
   const configFile = path.join(dir, 'config.json');
   if (fs.existsSync(configFile) && !force) return { created: false, dir, config: readConfig(cwd) };
   fs.mkdirSync(dir, { recursive: true });
-  const config = {
-    version: 1,
-    createdAt: new Date().toISOString(),
-    dashboardPort: 7717,
-    targetUrl: null,
-  };
+  const config = { ...defaultConfig(), createdAt: new Date().toISOString() };
   writeAtomic(configFile, `${JSON.stringify(config, null, 2)}\n`);
   writeAtomic(path.join(dir, 'session.json'), `${JSON.stringify(EMPTY(), null, 2)}\n`);
   const readme = path.join(dir, 'README.md');
@@ -45,11 +40,27 @@ export function init(cwd = process.cwd(), { force = false } = {}) {
 export function readConfig(cwd = process.cwd()) {
   const file = path.join(uiditDir(cwd), 'config.json');
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  return migrateConfig(JSON.parse(fs.readFileSync(file, 'utf8')));
+}
+
+function defaultConfig() {
+  return { version: 2, dashboardPort: 7717, controlPort: 7718, targetUrl: null,
+    dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
+    ui: { position: 'bottom-right', defaultOpen: false, inspectionDefault: false },
+    mcp: { enabled: true, allowAgentWrites: true, allowAgentServerControl: false } };
+}
+
+export function migrateConfig(value = {}) {
+  const base = defaultConfig();
+  return { ...base, ...value, version: 2, dev: { ...base.dev, ...(value.dev ?? {}) },
+    ui: { ...base.ui, ...(value.ui ?? {}) }, mcp: { ...base.mcp, ...(value.mcp ?? {}) } };
 }
 
 export function writeConfig(cwd, patch) {
-  const config = { ...(readConfig(cwd) ?? { version: 1 }), ...patch };
+  const current = migrateConfig(readConfig(cwd) ?? {});
+  const config = migrateConfig({ ...current, ...patch,
+    dev: { ...current.dev, ...(patch.dev ?? {}) }, ui: { ...current.ui, ...(patch.ui ?? {}) },
+    mcp: { ...current.mcp, ...(patch.mcp ?? {}) } });
   writeAtomic(path.join(uiditDir(cwd), 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
@@ -60,8 +71,10 @@ export function readSession(cwd = process.cwd()) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     return { ...EMPTY(), ...parsed };
-  } catch {
-    return EMPTY();
+  } catch (error) {
+    // Preserve corrupt user data. Returning an empty session here made the next
+    // mutation silently overwrite the only copy of their review history.
+    throw new Error(`Cannot read ${file}: ${error.message}. The file was left untouched.`);
   }
 }
 
@@ -179,7 +192,7 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
       "property": "padding",                       // style/attribute/class only
       "before": "12px",
       "after": "16px",
-      "applied": false,                            // applied in the browser session only
+      "applied": false,                            // committed to source code; preview-only edits remain false
       "page": "http://localhost:3000/cart",
       "note": "optional",
       "createdAt": "ISO-8601"
@@ -197,8 +210,8 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
    the nearest \`ancestors\` entry and say so explicitly.
 4. Treat every entry in \`edits\` as an explicit, user-approved change to apply in source.
    \`before\` is what was live when the user made the change, so it doubles as a sanity check.
+   \`applied: true\` means the change has been committed to source, never merely previewed.
 5. Mark feedback resolved by setting \`resolved: true\` on the comments you handled, or by
    running \`uidit resolve <commentId>\`. Never delete comments — they are the user's history.
-6. \`edits[].applied\` means "applied in the browser preview", NOT "applied in source". Set it to
-   \`true\` only after the change is committed to the real source files.
+6. Set \`edits[].applied\` to \`true\` only after the change is committed to the real source files.
 `;

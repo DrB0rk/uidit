@@ -10,6 +10,7 @@ import { uiditDir, readSession } from './store.js';
  */
 export function createHub({ cwd = process.cwd() } = {}) {
   const clients = new Set();
+  const listeners = new Set();
   let watcher = null;
   let timer = null;
 
@@ -18,8 +19,9 @@ export function createHub({ cwd = process.cwd() } = {}) {
     for (const res of clients) res.write(payload);
   };
 
-  const broadcastSession = () => push('session', readSession(cwd));
-  const broadcastConfig = () => push('config', { config: readConfigSafe(cwd) });
+  const emit = (type, data) => { for (const listener of listeners) listener(type, data); };
+  const broadcastSession = () => { const data = readSession(cwd); push('session', data); emit('session', data); };
+  const broadcastConfig = () => { const data = { config: readConfigSafe(cwd) }; push('config', data); emit('config', data); };
 
   function readConfigSafe(dir) {
     try {
@@ -59,6 +61,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
     notifyConfig() {
       broadcastConfig();
     },
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     watch,
     close() {
       clearTimeout(timer);
@@ -66,6 +69,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
       watcher = null;
       for (const res of clients) res.end();
       clients.clear();
+      listeners.clear();
     },
     get clientCount() {
       return clients.size;

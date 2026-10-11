@@ -45,7 +45,13 @@ function probe(port, host, timeout = 250) {
 }
 
 function probeEitherHost(port) {
-  return Promise.any(HOSTS.map((h) => probe(port, h))).catch(() => null);
+  return new Promise((resolve) => {
+    let pending = HOSTS.length;
+    for (const host of HOSTS) probe(port, host).then((open) => {
+      if (open) resolve(host);
+      else if (--pending === 0) resolve(null);
+    });
+  });
 }
 
 function fetchTarget(url, timeout = 800) {
@@ -94,17 +100,15 @@ export async function discoverTargets({ extraPorts = [], excludePorts = [], incl
     .filter((p) => p > 0 && p < 65536 && !skip.has(String(p)))
     .sort((a, b) => a - b);
 
-  const open = await Promise.all(candidates.map((p) => probeEitherHost(p)));
-  const ports = candidates.filter((_, i) => open[i] !== null);
-
-  const urls = ports.flatMap((p) => HOSTS.map((h) => ({
+  const openHosts = await Promise.all(candidates.map((p) => probeEitherHost(p)));
+  const urls = candidates.flatMap((p, i) => openHosts[i] ? [{
     port: p,
-    url: `http://${h === '::1' ? '[::1]' : h}:${p}/`,
-  })));
+    url: `http://${openHosts[i] === '::1' ? '[::1]' : openHosts[i]}:${p}/`,
+  }] : []);
 
   const results = await Promise.all(urls.map((u) => fetchTarget(u.url)));
 
-  // One entry per port: IPv4 first, so the reported URL matches what people type.
+  // One entry per port, using the loopback address that actually answered.
   const byPort = new Map();
   results
     .map((r, i) => (r ? { ...r, port: urls[i].port } : null))

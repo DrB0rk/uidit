@@ -5,12 +5,14 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { server as fixture } from './fixtures/demo-site.js';
 import { init } from '../src/server/store.js';
 
 const ROOT = '/tmp/uidit-e2e';
-const UIDIT = '/home/drb0rk/Projects/uidit';
+const UIDIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let DASH;
 
 async function freePort() {

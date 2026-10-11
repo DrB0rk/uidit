@@ -23,19 +23,21 @@ uidit closes that gap. Your feedback is already structured data in the project.
 curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
 
-Needs Node 18+ and npm. The installer checks for both, installs the `uidit`
+Needs Node 22+ and npm. The installer checks for both, installs the `uidit`
 command, and verifies it runs before exiting. From a clone instead: `npm install -g .`
 
 ## Use
 
 ```sh
 cd your-project
-uidit init     # once — creates .uidit/
-npm run dev     # your project's dev server, in another terminal
-uidit          # dashboard at http://127.0.0.1:7717
+uidit          # starts package.json's dev script and the UIDIT review server
 ```
 
-Hit **Discover** or paste a URL, then click anything in the preview.
+UIDIT recognizes npm, pnpm, yarn, and Bun from `package.json` and lockfiles. For
+other projects, pass a command explicitly with `uidit -- cargo run`, or configure
+`dev.command` in `.uidit/config.json`. UIDIT never runs install commands. Use
+`uidit --attach http://127.0.0.1:3000` to connect without owning that server, or
+`uidit --no-start` for manual discovery.
 
 ![uidit reviewing a running app](docs/screenshot.png)
 
@@ -101,7 +103,16 @@ Two commands help:
 ```sh
 uidit status              # open feedback and pending edits, print only
 uidit resolve [ids…]      # mark comments resolved (all open, if no ids)
+uidit mcp info            # show the authenticated local MCP endpoint
+uidit mcp stdio           # stdio bridge for MCP clients; UIDIT must be running
 ```
+
+UIDIT exposes an authenticated, loopback-only Streamable HTTP MCP endpoint at
+`http://127.0.0.1:7718/mcp`. Run `uidit mcp info` to obtain the project token and
+connection details. The token is stored under `.uidit/runtime/` with owner-only
+permissions; `.uidit/` is ignored by `uidit init`. Agent feedback writes are
+enabled by default and dev process control is disabled unless explicitly enabled
+with `mcp.allowAgentServerControl` in `.uidit/config.json`.
 
 An `uidit` skill for agents is bundled in [`skills/uidit/`](skills/uidit/) —
 copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
@@ -112,6 +123,11 @@ copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
 | --- | --- |
 | `uidit init` | create `.uidit/` in the current project |
 | `uidit start [port]` | run the dashboard (default 7717) and discover dev servers |
+| `uidit -- <command...>` | launch an explicit project dev command |
+| `uidit --attach <url>` | attach to a local server without stopping it |
+| `uidit --no-start` | legacy manual discovery workflow |
+| `uidit mcp info` | print local MCP connection details |
+| `uidit mcp stdio` | bridge stdio MCP to a running local instance |
 | `uidit status` | print open feedback and pending edits |
 | `uidit resolve [ids…]` | resolve comments |
 | `uidit build` | rebuild the dashboard UI |

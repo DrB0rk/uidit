@@ -7,12 +7,22 @@
 
   const API = '/api';
   const state = {
-    mode: 'inspect',
+    mode: 'off',
     selected: null,
     pendingStyle: null,
   };
   let hoverEl = null;
   let savedOutline = '';
+
+  // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
+  // schema-checked message set from the exact embedded window.
+  const controls = document.createElement('iframe');
+  const controlOrigin = window.__UIDIT_CONTROL__ || 'http://127.0.0.1:7718';
+  controls.src = `${controlOrigin}/floating`;
+  controls.title = 'UIDIT review controls';
+  controls.setAttribute('data-uidit-ui', '1');
+  controls.style.cssText = 'position:fixed;right:16px;bottom:16px;width:52px;height:52px;border:0;z-index:2147483647;background:transparent';
+  (document.documentElement || document).append(controls);
 
   const post = (type, payload) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, '*');
 
@@ -180,6 +190,16 @@
 
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
+    if (ev.source === controls.contentWindow && ev.origin === controlOrigin && msg?.source === 'uidit-control') {
+      if (msg.type === 'resize') { controls.style.width = msg.open === true ? '264px' : '52px'; controls.style.height = msg.open === true ? '360px' : '52px'; }
+      if (msg.type === 'inspect') { state.mode = state.mode === 'inspect' ? 'off' : 'inspect'; post('mode', { mode: state.mode }); }
+      if (msg.type === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) {
+        api('/comment', 'POST', { elementId: state.selected?.record.id ?? null, page: realPage(), text: msg.text.trim() })
+          .then(({ comment }) => post('commented', { comment }))
+          .catch((err) => post('error', { message: err.message }));
+      }
+      return;
+    }
     if (!msg || msg.source !== 'uidit-dashboard') return;
     handle(msg).catch((err) => post('error', { message: err.message }));
   });

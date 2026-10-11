@@ -3,14 +3,14 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 #
-# Installs the `uidit` command. Needs Node 18+ and npm; if either is missing the
+# Installs the `uidit` command. Needs Node 22+ and npm; if either is missing the
 # script stops and tells you what to install rather than half-installing something.
 
 set -eu
 
 REPO="DrB0rk/uidit"
 BRANCH="master"
-MIN_NODE_MAJOR=18
+MIN_NODE_MAJOR=22
 
 say()  { printf '%s\n' "$*"; }
 warn() { printf '  %s\n' "$*" >&2; }

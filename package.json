@@ -1,13 +1,13 @@
 {
   "name": "uidit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local UI review dashboard: tag elements, comment, and make simple edits directly on a running dev server. Everything persists to .uidit for coding agents to read.",
   "type": "module",
   "bin": {
     "uidit": "bin/uidit.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "files": [
     "bin",
@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "astro": "^7.3.8",
     "lucide-react": "^1.55.0",
     "react": "^19.1.0",

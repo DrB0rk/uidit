@@ -7,13 +7,15 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { init } from '../src/server/store.js';
 import { chromium } from 'playwright';
 import { reactServer } from './fixtures/react-site.js';
 
 const ROOT = '/tmp/uidit-stacks';
-const UIDIT = '/home/drb0rk/Projects/uidit';
+const UIDIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let DASH;
 
 async function freePort() {
