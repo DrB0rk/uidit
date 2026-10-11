@@ -49,6 +49,7 @@ export function readConfig(cwd = process.cwd()) {
 
 function defaultConfig() {
   return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
+    services: [],
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
     ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false, allowBrowserInspection: false },
     mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false, allowBrowserControl: false } };
@@ -58,7 +59,7 @@ export function migrateConfig(value = {}) {
   const base = defaultConfig();
   const controlPort = value.controlPort ?? value.dashboardPort ?? base.controlPort;
   return { ...base, ...value, version: 2, dashboardPort: controlPort, controlPort,
-    previewPort: value.previewPort ?? base.previewPort, dev: { ...base.dev, ...(value.dev ?? {}) },
+    previewPort: value.previewPort ?? base.previewPort, services: Array.isArray(value.services) ? value.services : [], dev: { ...base.dev, ...(value.dev ?? {}) },
     ui: { ...base.ui, ...(value.ui ?? {}) }, mcp: { ...base.mcp, ...(value.mcp ?? {}) } };
 }
 

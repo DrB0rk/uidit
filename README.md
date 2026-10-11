@@ -63,8 +63,21 @@ The preview toolbar also supports custom viewport dimensions and one-, two-, or
 three-pane responsive comparisons. These panes resize the browser viewport; they do
 not emulate touch hardware or native mobile browser behavior. Component state
 controls can temporarily focus or disable a selected element and restore it. App-owned
-loading, error, empty, and success states need project fixtures and are not forced by
-generic DOM manipulation.
+loading, error, empty, success, open, closed, and selected states use reversible
+project fixtures and are not forced by generic DOM manipulation.
+
+An app can expose reversible state fixtures for these states:
+
+```js
+window.__UIDIT_STATE_FIXTURES__ = {
+  loading(element) {
+    element.dataset.reviewState = 'loading';
+    return () => delete element.dataset.reviewState;
+  },
+};
+```
+
+Each fixture receives the selected element and must return a cleanup function.
 
 **Quick edits** — edit text in place, set a CSS property, toggle a class, set an
 attribute, hide an element. The change applies to the preview immediately and is
@@ -75,10 +88,13 @@ saved as an explicit `before → after` record.
 
 **Team review** — create an invite-only review room from the Feedback sidebar. A
 Cloudflare Worker Durable Object keeps the room state and relays live comments,
-replies, progress, assignments, participant presence, and activity to the local
-UIDIT session. Teammates join from the invite page; their comments and replies
-sync back to the project. The owner token stays in `.uidit/runtime/` and the
-Worker admin secret is used only to create a room.
+replies, participant presence, and activity to the local UIDIT session. The
+sharing form requires explicit acknowledgement that the preview and review data
+will be externally accessible. Invite links expire after seven days; rotating a
+link revokes the old link and disconnects current reviewers. Remote reviewers can
+comment and reply, but cannot change workflow status or assignments, call local
+MCP tools, or enumerate local services. The owner token stays in
+`.uidit/runtime/`; the Worker admin secret is used only to create a room.
 
 **Interaction flows** — record clicks, form actions, and navigation from the
 Flows panel, then replay them against the connected preview. Each step can keep a
@@ -87,7 +103,8 @@ fields are omitted. Console and failed network requests are captured only while
 a recording is active. Flow metadata and screenshots stay in the local
 `.uidit/` folder. Export a saved flow as a Playwright test; recorded input
 values are replaced with environment placeholders, and selector drift fails
-with an explicit assertion.
+with an explicit assertion. Add visibility, text, enabled-state, and route
+assertions while recording to keep the intended outcome with the flow.
 
 **Agent tasks and visual review** — create a task from feedback, let an agent
 claim it, attach test or screenshot evidence, and move it through implemented
@@ -113,6 +130,28 @@ matches require an explicit reattach. Source search is an inferred hint that
 must be confirmed in code. Git context is read-only, and the impact view reports
 only elements and routes observed in this review session.
 
+**Selective HMR verification** — after a relevant file changes, UIDIT checks only
+active tasks linked to that source and reports whether their recorded page anchors
+are still present. This is structural evidence; it does not claim the visual
+change is correct or that tests passed.
+
+**Multi-service workspaces** — configure up to eight local services with project
+relative working directories and dependency ordering in `.uidit/config.json`:
+
+```json
+{
+  "services": [
+    { "id": "api", "name": "API", "cwd": "apps/api", "command": ["npm", "run", "dev", "--", "--port", "4100"], "url": "http://127.0.0.1:4100" },
+    { "id": "web", "name": "Web", "cwd": "apps/web", "command": ["npm", "run", "dev", "--", "--port", "3000"], "url": "http://127.0.0.1:3000", "dependencies": ["api"] }
+  ]
+}
+```
+
+Each process has separate logs and ownership. Start them in the Server panel and
+use **Preview** to switch the live view between ready local services. UIDIT only
+stops processes it started, and service working directories cannot escape the
+project root.
+
 ### Cloudflare relay setup
 
 The relay is a standalone Worker under `cloudflare/relay/`. It uses a SQLite
@@ -128,8 +167,10 @@ npx wrangler secret put ADMIN_SECRET --config cloudflare/relay/wrangler.toml
 Set `ADMIN_SECRET` to a long random value (at least 24 characters), then paste
 the Worker origin and secret into **Feedback → Team review**. For local relay
 development, run `npm run relay:dev -- --var ADMIN_SECRET:replace-with-a-long-random-value`.
-The relay stores comments and room membership in Cloudflare; do not share
-invite links outside the intended review group. The invite is a bearer link.
+The relay stores comments, room membership, and a bounded activity log in
+Cloudflare. Invite links are bearer credentials: share them only with the
+intended review group; they expire after seven days and can be rotated from the
+Feedback panel.
 
 ## Any dev server
 

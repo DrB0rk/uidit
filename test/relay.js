@@ -7,7 +7,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const SECRET = 'local-relay-test-secret-1234567890';
 const server = net.createServer();
 const port = await new Promise((resolve) => server.listen(0, '127.0.0.1', () => { const value = server.address().port; server.close(() => resolve(value)); }));
-const worker = spawn('npx', ['wrangler', 'dev', '--config', 'cloudflare/relay/wrangler.toml', '--port', String(port), '--var', `ADMIN_SECRET:${SECRET}`], { cwd: ROOT, stdio: 'ignore' });
+const worker = spawn('npx', ['wrangler', 'dev', '--config', 'cloudflare/relay/wrangler.toml', '--port', String(port), '--var', `ADMIN_SECRET:${SECRET}`], { cwd: ROOT, stdio: 'ignore', detached: process.platform !== 'win32' });
 const origin = `http://127.0.0.1:${port}`;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const waitForMessage = (socket, predicate, timeout = 7000) => new Promise((resolve, reject) => {
@@ -68,16 +68,31 @@ try {
   const replySnapshot = waitForMessage(ownerSocket, (message) => message.type === 'snapshot' && message.room.session.comments.find((item) => item.id === comment.id)?.replies?.length === 1);
   memberSocket.send(JSON.stringify({ type: 'comment:reply', commentId: comment.id, text: 'I will update it.' }));
   await replySnapshot;
-  const assignedSnapshot = waitForMessage(ownerSocket, (message) => message.type === 'snapshot' && message.room.session.comments.find((item) => item.id === comment.id)?.assignee === 'Reviewer');
   memberSocket.send(JSON.stringify({ type: 'comment:update', commentId: comment.id, status: 'in_progress', assignee: 'Reviewer' }));
-  const assigned = await assignedSnapshot;
-  assert.equal(assigned.room.session.comments.find((item) => item.id === comment.id)?.status, 'in_progress');
+  const readonlySnapshot = waitForMessage(ownerSocket, (message) => message.type === 'snapshot' && message.room.session.comments.find((item) => item.id === comment.id)?.replies?.length === 2);
+  memberSocket.send(JSON.stringify({ type: 'comment:reply', commentId: comment.id, text: 'Still comment-only.' }));
+  const readonly = await readonlySnapshot;
+  assert.equal(readonly.room.session.comments.find((item) => item.id === comment.id)?.status, 'open', 'remote reviewers cannot change workflow status');
+  assert.equal(readonly.room.session.comments.find((item) => item.id === comment.id)?.assignee, undefined, 'remote reviewers cannot assign comments');
   const ownerSync = waitForMessage(memberSocket, (message) => message.type === 'snapshot' && message.room.session.elements?.some((item) => item.id === 'el-test'));
   ownerSocket.send(JSON.stringify({ type: 'sync', session: { version: 1, revision: 4, updatedAt: new Date().toISOString(), elements: [{ id: 'el-test', selector: '#checkout' }], edits: [], comments: [{ id: 'cm-image', text: 'Use this photo as a reference', attachments: [{ name: 'reference.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/2Q==' }] }] } }));
   const sharedImage = await ownerSync;
   assert.equal(sharedImage.room.session.comments.find((item) => item.id === 'cm-image').attachments[0].name, 'reference.jpg');
-  console.log('  ok  Cloudflare relay auth, invite page, realtime cursor/presence, comments, replies, assignments and owner sync');
+  const expiredInvite = await fetch(`${origin}/api/rooms/${room.roomId}/revoke-invite`, { method: 'POST' });
+  assert.equal(expiredInvite.status, 401, 'invite revocation requires the owner token');
+  const closed = new Promise((resolve) => memberSocket.addEventListener('close', resolve, { once: true }));
+  const revoked = await fetch(`${origin}/api/rooms/${room.roomId}/revoke-invite`, { method: 'POST', headers: { authorization: `Bearer ${room.ownerToken}` } });
+  assert.equal(revoked.status, 200);
+  const rotated = await revoked.json();
+  assert.ok(Date.parse(rotated.inviteExpiresAt) > Date.now());
+  await closed;
+  const oldLink = await fetch(`${origin}/api/rooms/${room.roomId}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Late reviewer', inviteToken: room.inviteToken }) });
+  assert.equal(oldLink.status, 401, 'rotating a link revokes the previous invite');
+  const newLink = await fetch(`${origin}/api/rooms/${room.roomId}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'New reviewer', inviteToken: rotated.inviteToken }) });
+  assert.equal(newLink.status, 200, 'the replacement invite remains usable');
+  console.log('  ok  Cloudflare relay auth, expiring/revocable invites, comment-only access, presence, audit records and owner sync');
 } finally {
-  ownerSocket?.close(); memberSocket?.close(); worker.kill('SIGTERM');
+  ownerSocket?.close(); memberSocket?.close();
+  try { if (process.platform !== 'win32' && worker.pid) process.kill(-worker.pid, 'SIGTERM'); else worker.kill('SIGTERM'); } catch {}
   await new Promise((resolve) => { if (worker.exitCode !== null) resolve(); else { worker.once('exit', resolve); setTimeout(resolve, 2000).unref(); } });
 }

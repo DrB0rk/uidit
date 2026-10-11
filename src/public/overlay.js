@@ -669,8 +669,20 @@
     if (msg.type === 'replayStep') {
       const { id, step } = msg;
       try {
+        const isUrlAssertion = step?.type === 'assertion' && step.action === 'assertUrl';
         const el = step?.selector ? document.querySelector(step.selector) : null;
-        if (step?.type !== 'navigation' && !el) throw new Error(`Element not found: ${step?.selector ?? 'missing selector'}`);
+        if (step?.type !== 'navigation' && !isUrlAssertion && !el) throw new Error(`Element not found: ${step?.selector ?? 'missing selector'}`);
+        if (step?.type === 'assertion') {
+          if (step.action === 'assertUrl') {
+            const expectedPath = (() => { try { return new URL(step.value, realPage()).pathname; } catch { return step.value; } })();
+            if (new URL(realPage()).pathname !== expectedPath) throw new Error(`Expected route ${expectedPath}; observed ${new URL(realPage()).pathname}`);
+          } else if (step.action === 'assertVisible') {
+            const style = getComputedStyle(el); const bounds = el.getBoundingClientRect();
+            if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || bounds.width <= 0 || bounds.height <= 0) throw new Error('Element is not visible');
+          } else if (step.action === 'assertText' && !collapse(el.textContent).includes(step.value ?? '')) throw new Error(`Expected text to include: ${step.value}`);
+          else if (step.action === 'assertEnabled' && (el.disabled === true || el.getAttribute('aria-disabled') === 'true')) throw new Error('Element is disabled');
+          post('replay-result', { id, ok: true, observed: step.action === 'assertUrl' ? realPage() : collapse(el.textContent).slice(0, 300) }); return;
+        }
         if (step?.action === 'click') el.click();
         else if (step?.action === 'fill') {
           if (step.sensitive) throw new Error('Sensitive form value was not recorded');
@@ -714,6 +726,17 @@
         const wasDisabled = el.disabled; el.disabled = true;
         componentStateRestore = () => { if (el.isConnected) el.disabled = wasDisabled; };
         post('component-state', { state: 'disabled', ok: true, label: 'Temporary DOM state; reload or Reset restores it' }); return;
+      }
+      if (['loading','error','empty','success','open','closed','selected'].includes(msg.state)) {
+        const fixtures = window.__UIDIT_STATE_FIXTURES__;
+        const fixture = fixtures && typeof fixtures === 'object' ? fixtures[msg.state] : null;
+        if (typeof fixture !== 'function') { post('component-state', { state: msg.state, ok: false, error: `Add an app fixture at window.__UIDIT_STATE_FIXTURES__.${msg.state}` }); return; }
+        try {
+          const restore = fixture(el);
+          if (typeof restore !== 'function') { post('component-state', { state: msg.state, ok: false, error: 'State fixture must return a restore function' }); return; }
+          componentStateRestore = () => restore();
+          post('component-state', { state: msg.state, ok: true, label: 'App fixture active; Reset restores the previous state' }); return;
+        } catch (error) { post('component-state', { state: msg.state, ok: false, error: `State fixture failed: ${error.message}` }); return; }
       }
       post('component-state', { state: msg.state, ok: false, error: 'This state needs an application fixture and is not available through generic DOM preview' });
       return;

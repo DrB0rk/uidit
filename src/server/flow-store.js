@@ -16,7 +16,12 @@ export function createFlow(cwd, { name } = {}) {
 
 export function addFlowStep(cwd, flowId, input = {}) {
   if (!safeId(flowId)) throw new Error('invalid flow id');
-  if (!['click', 'input', 'submit', 'navigation', 'checkpoint'].includes(input.type)) throw new Error('unsupported flow step type');
+  if (!['click', 'input', 'submit', 'navigation', 'checkpoint', 'assertion'].includes(input.type)) throw new Error('unsupported flow step type');
+  if (input.type === 'assertion') {
+    if (!['assertVisible','assertText','assertEnabled','assertUrl'].includes(input.action)) throw new Error('unsupported flow assertion');
+    if (input.action !== 'assertUrl' && (typeof input.selector !== 'string' || !input.selector.trim() || input.selector.length > 2000)) throw new Error('flow assertion requires a bounded selector');
+    if (typeof input.value !== 'string' || input.value.length > 1000) throw new Error('flow assertion value must be a string under 1000 characters');
+  }
   const session = readSession(cwd); const flow = session.flows.find((item) => item.id === flowId);
   if (!flow || flow.status !== 'recording') throw new Error('flow is not recording');
   if (flow.steps.length >= 300) throw new Error('flow step limit reached');

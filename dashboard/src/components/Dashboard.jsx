@@ -225,6 +225,10 @@ export default function Dashboard() {
     try { await actions.setTargetUrl(url); setSelected(null); onStatus(`Connected to ${url}`, 'ok'); }
     catch (error) { onStatus(error.message, 'error'); }
   };
+  const previewService = async (service) => {
+    try { await actions.setTargetUrl(service.url); setSelected(null); setReloadKey((key) => key + 1); onStatus(`Previewing ${service.name}`, 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+  };
   const discover = async () => {
     try { const found = await actions.discover(); onStatus(found.length ? `${found.length} local server${found.length === 1 ? '' : 's'} found` : 'No local dev server found', found.length ? 'ok' : 'error'); return found; }
     catch (error) { onStatus(error.message, 'error'); return []; }
@@ -266,7 +270,7 @@ export default function Dashboard() {
         {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
         {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
         {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
-        {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} browserContext={browserContext} browserDiagnostics={browserDiagnostics} />}
+        {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} />}
         {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
         {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
       </div>

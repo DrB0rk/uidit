@@ -6,6 +6,20 @@ export function exportFlowAsPlaywright(flow) {
   let valueIndex = 0;
   for (const [index, step] of flow.steps.entries()) {
     lines.push('', `  // Step ${index + 1}: ${String(step.label || step.action || step.type).replace(/[\r\n]/g, ' ').slice(0, 120)}`);
+    if (step.type === 'assertion') {
+      if (step.action === 'assertUrl') {
+        let pathname = '/'; try { pathname = new URL(step.value).pathname || step.value; } catch { pathname = step.value || '/'; }
+        lines.push(`  await expect(page).toHaveURL(new RegExp(${quote(pathname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))}));`);
+      } else if (typeof step.selector === 'string' && step.selector && step.selector.length <= 1000) {
+        const locator = `step${index + 1}`;
+        lines.push(`  const ${locator} = page.locator(${quote(step.selector)});`, `  await expect(${locator}, 'Selector drift at recorded assertion ${index + 1}').toHaveCount(1);`);
+        if (step.action === 'assertVisible') lines.push(`  await expect(${locator}).toBeVisible();`);
+        else if (step.action === 'assertText') lines.push(`  await expect(${locator}).toContainText(${quote(step.value)});`);
+        else if (step.action === 'assertEnabled') lines.push(`  await expect(${locator}).toBeEnabled();`);
+        else lines.push('  // Unsupported assertion; review it before running this export.');
+      } else lines.push('  // Unsupported assertion: no safe selector was recorded.');
+      continue;
+    }
     if (step.action === 'navigate' || step.type === 'navigation') {
       let pathname = '/';
       try { pathname = new URL(step.page).pathname || '/'; } catch {}

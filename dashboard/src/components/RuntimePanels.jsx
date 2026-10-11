@@ -3,6 +3,9 @@ import { CircleDot, Square, Play, Image as ImageIcon } from 'lucide-react';
 
 export function FlowsPanel({ session, actions, onStatus, onRecording, onReplay, replayState }) {
   const [name, setName] = useState('');
+  const [assertionSelector, setAssertionSelector] = useState('');
+  const [assertionType, setAssertionType] = useState('assertVisible');
+  const [assertionValue, setAssertionValue] = useState('');
   const [busy, setBusy] = useState(false);
   const active = session.flows?.find((flow) => flow.status === 'recording');
   const start = async (event) => {
@@ -16,6 +19,13 @@ export function FlowsPanel({ session, actions, onStatus, onRecording, onReplay, 
     try { await actions.updateFlow(active.id, { status: 'recorded' }); onRecording(null); onStatus('Flow saved', 'ok'); }
     catch (error) { onStatus(error.message, 'error'); }
   };
+  const addAssertion = async (event) => {
+    event.preventDefault();
+    try {
+      await actions.addFlowStep(active.id, { type: 'assertion', action: assertionType, selector: assertionSelector.trim(), value: assertionValue, label: `Assert ${assertionType.replace(/^assert/, '').toLowerCase()}` });
+      setAssertionValue(''); onStatus('Assertion added to the flow', 'ok');
+    } catch (error) { onStatus(error.message, 'error'); }
+  };
   const exportFlow = async (flow) => {
     try {
       const response = await fetch('/api/state'); if (!response.ok) throw new Error('Could not read the saved flow');
@@ -28,18 +38,21 @@ export function FlowsPanel({ session, actions, onStatus, onRecording, onReplay, 
   return <section className="runtime-panel" aria-label="Interaction flows">
     <h2>Interaction flows</h2>
     <p>Record repeatable browser steps with page snapshots and console or network errors. Flow screenshots mask form fields; passwords, email, and phone values are never recorded.</p>
-    {active ? <div className="runtime-card flow-recording"><div className="runtime-status"><CircleDot size={15} className="flow-record-dot"/><strong>Recording · {active.name}</strong><span className="spacer"/><span>{active.steps.length} steps</span></div><p>Interact with the page. Clicks, text entry, and form submissions are captured.</p><button className="btn danger" onClick={stop}><Square size={13}/> Stop and save</button></div> : <form className="runtime-card flow-create" onSubmit={start}><label className="runtime-label" htmlFor="uidit-flow-name">Flow name</label><div className="flow-name-row"><input id="uidit-flow-name" className="runtime-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Checkout on mobile"/><button className="btn primary" disabled={busy}>{busy ? 'Starting…' : 'Start recording'}</button></div><small>Starting a recording turns on page instrumentation until you stop it.</small></form>}
+    {active ? <div className="runtime-card flow-recording"><div className="runtime-status"><CircleDot size={15} className="flow-record-dot"/><strong>Recording · {active.name}</strong><span className="spacer"/><span>{active.steps.length} steps</span></div><p>Interact with the page. Clicks, text entry, and form submissions are captured.</p><form className="flow-assertion-form" onSubmit={addAssertion}><strong>Add an assertion</strong><label className="runtime-label" htmlFor="uidit-assertion-type">Check</label><select id="uidit-assertion-type" className="runtime-input" value={assertionType} onChange={(event) => setAssertionType(event.target.value)}><option value="assertVisible">Element is visible</option><option value="assertEnabled">Element is enabled</option><option value="assertText">Element contains text</option><option value="assertUrl">Page is on route</option></select>{assertionType !== 'assertUrl' && <label className="runtime-label" htmlFor="uidit-assertion-selector">CSS selector<input id="uidit-assertion-selector" className="runtime-input" required value={assertionSelector} onChange={(event) => setAssertionSelector(event.target.value)} placeholder="#continue-button" /></label>}{['assertText','assertUrl'].includes(assertionType) && <label className="runtime-label" htmlFor="uidit-assertion-value">Expected {assertionType === 'assertUrl' ? 'path' : 'text'}<input id="uidit-assertion-value" className="runtime-input" required value={assertionValue} onChange={(event) => setAssertionValue(event.target.value)} placeholder={assertionType === 'assertUrl' ? '/checkout/complete' : 'Order confirmed'} /></label>}<button className="btn" type="submit">Add assertion</button></form><button className="btn danger" onClick={stop}><Square size={13}/> Stop and save</button></div> : <form className="runtime-card flow-create" onSubmit={start}><label className="runtime-label" htmlFor="uidit-flow-name">Flow name</label><div className="flow-name-row"><input id="uidit-flow-name" className="runtime-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Checkout on mobile"/><button className="btn primary" disabled={busy}>{busy ? 'Starting…' : 'Start recording'}</button></div><small>Starting a recording turns on page instrumentation until you stop it.</small></form>}
     <h3>Saved flows · {session.flows?.length ?? 0}</h3>
     <div className="flow-list">{[...(session.flows ?? [])].slice().reverse().map((flow) => <article className="runtime-card flow-card" key={flow.id}><div className="runtime-status"><strong>{flow.name}</strong><span className="spacer"/><span className={`tag ${flow.status === 'recorded' ? 'done' : ''}`}>{flow.status}</span></div><div className="runtime-muted">{flow.steps.length} steps · {flow.logs?.length ?? 0} browser errors · {new Date(flow.createdAt).toLocaleString()}</div>{flow.steps.map((step, index) => <div className="flow-step" key={step.id}><span>{index + 1}. {step.action}</span><code>{step.label || step.selector || step.page || step.type}</code>{step.sensitive && <small>Sensitive value omitted</small>}{step.screenshotUrl ? <a href={step.screenshotUrl} target="_blank" rel="noreferrer"><img loading="lazy" src={step.screenshotUrl} alt={`Screenshot after step ${index + 1}: ${step.label || step.action}`}/></a> : <span className="flow-no-screenshot"><ImageIcon size={13}/> Snapshot unavailable</span>}</div>)}{flow.logs?.length > 0 && <details className="flow-errors"><summary>{flow.logs.length} console/network errors</summary>{flow.logs.map((log) => <div key={log.id}><strong>{log.kind}</strong> {log.message}<small>{log.url}</small></div>)}</details>}<div className="flow-actions"><button className="btn" disabled={flow.status !== 'recorded' || Boolean(active) || replayState?.flowId === flow.id && replayState.running} onClick={() => onReplay(flow)}><Play size={13}/>{replayState?.flowId === flow.id && replayState.running ? 'Replaying…' : 'Replay flow'}</button><button className="btn" disabled={flow.status !== 'recorded'} onClick={() => exportFlow(flow)}>Export Playwright test</button></div>{replayState?.flowId === flow.id && !replayState.running && <div className={`flow-result ${replayState.failed ? 'error' : 'ok'}`}>{replayState.failed ? `${replayState.failed} step(s) failed` : `Passed ${replayState.passed} step(s)`}{replayState.messages?.length > 0 && <ul>{replayState.messages.map((message, index) => <li key={index}>{message}</li>)}</ul>}</div>}</article>)}</div>
     {(!session.flows || session.flows.length === 0) && <div className="empty-state">No saved flows. Record a path through your app to replay it after changes.</div>}
   </section>;
 }
 
-export function ServerPanel({ config, dev, actions, onStatus, browserContext, browserDiagnostics = [] }) {
+export function ServerPanel({ config, dev, actions, onStatus, onPreviewService, browserContext, browserDiagnostics = [] }) {
   const [command, setCommand] = useState(JSON.stringify(config?.dev?.command ?? [], null, 2));
   const [cwd, setCwd] = useState(config?.dev?.cwd ?? '.');
   const [busy, setBusy] = useState(false);
+  const [servicesDraft, setServicesDraft] = useState('[]');
+  const [servicesBusy, setServicesBusy] = useState(false);
   useEffect(() => { setCommand(JSON.stringify(config?.dev?.command ?? [], null, 2)); setCwd(config?.dev?.cwd ?? '.'); }, [config?.dev?.command, config?.dev?.cwd]);
+  useEffect(() => { setServicesDraft(JSON.stringify(config?.services ?? [], null, 2)); }, [config?.services]);
   const run = async (action) => {
     setBusy(true);
     try { const next = await actions.devAction(action); onStatus(`Development server ${next.state}`, 'ok'); }
@@ -55,6 +68,24 @@ export function ServerPanel({ config, dev, actions, onStatus, browserContext, br
     } catch (error) { onStatus(error.message, 'error'); }
   };
   const running = ['ready', 'starting', 'attached'].includes(dev?.state);
+  const saveServices = async () => {
+    setServicesBusy(true);
+    try { const value = JSON.parse(servicesDraft); if (!Array.isArray(value)) throw new Error('Workspace services must be a JSON array'); await actions.setConfig({ services: value }); onStatus('Workspace services saved', 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setServicesBusy(false); }
+  };
+  const serviceAction = async (id, action) => {
+    setServicesBusy(true);
+    try { await actions.serviceAction(id, action); onStatus(`Service ${id} ${action === 'start' ? 'started' : 'stopped'}`, 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setServicesBusy(false); }
+  };
+  const serviceGroupAction = async (action) => {
+    setServicesBusy(true);
+    try { await actions.serviceGroupAction(action); onStatus(action === 'start-all' ? 'Workspace services started' : 'Workspace services stopped', 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setServicesBusy(false); }
+  };
   return <section className="runtime-panel" aria-label="Development server">
     <h2>Development server</h2>
     <p>UIDIT supervises only commands it starts. Attached servers are never stopped or restarted.</p>
@@ -73,8 +104,16 @@ export function ServerPanel({ config, dev, actions, onStatus, browserContext, br
     <label className="runtime-label" htmlFor="uidit-dev-cwd">Working directory, relative to project</label>
     <input id="uidit-dev-cwd" className="runtime-input" value={cwd} onChange={(e) => setCwd(e.target.value)} />
     <button className="btn" onClick={save}>Save command</button>
+    <h3>Workspace services</h3>
+    <p>Run related services as separate processes. Dependencies start first. UIDIT only stops services it owns.</p>
+    <div className="runtime-card workspace-services">
+      <div className="runtime-actions"><button className="btn primary" disabled={servicesBusy || !dev?.services?.length} onClick={() => serviceGroupAction('start-all')}>Start all</button><button className="btn danger" disabled={servicesBusy || !dev?.services?.some((service) => service.owned)} onClick={() => serviceGroupAction('stop-all')}>Stop owned services</button></div>
+      {(dev?.services ?? []).length ? <ul className="service-list">{dev.services.map((service) => <li key={service.id}><div><strong>{service.name}</strong><small>{service.command}</small>{service.url && <code>{service.url}</code>}{service.error && <span className="runtime-error">{service.error}</span>}</div><span className={`tag ${['ready','attached'].includes(service.state) ? 'done' : ''}`}>{service.state ?? 'idle'}{service.owned ? ' · owned' : ''}</span>{service.url && <button className="btn sm" disabled={!['ready','attached'].includes(service.state)} onClick={() => onPreviewService(service)} aria-label={`Preview ${service.name}`}>Preview</button>}<button className={`btn sm ${service.owned && service.state === 'ready' ? 'danger' : ''}`} disabled={servicesBusy || !service.command} onClick={() => serviceAction(service.id, service.owned && service.state === 'ready' ? 'stop' : 'start')}>{service.owned && service.state === 'ready' ? 'Stop' : 'Start'}</button><details><summary>Logs · {(service.logs ?? []).length}</summary><pre className="runtime-logs">{(service.logs ?? []).slice(-30).map((line) => `[${line.stream}] ${line.text}`).join('\n') || 'No service output yet.'}</pre></details></li>)}</ul> : <div className="empty-state">No workspace services configured.</div>}
+      <details className="service-config"><summary>Configure services</summary><p className="runtime-muted">Use project-relative working directories and argv arrays (no shell). Example: <code>{'{"id":"api","command":["npm","run","dev"],"cwd":"apps/api","dependencies":[]}'}</code></p><label className="runtime-label" htmlFor="uidit-services-config">Services JSON</label><textarea id="uidit-services-config" className="runtime-input command-input" value={servicesDraft} onChange={(event) => setServicesDraft(event.target.value)} spellCheck="false" /><button className="btn" disabled={servicesBusy} onClick={saveServices}>{servicesBusy ? 'Saving…' : 'Save services'}</button></details>
+    </div>
     <h3>Recent output</h3>
     <pre className="runtime-logs">{(dev?.logs ?? []).slice(-60).map((line) => `[${line.stream}] ${line.text}`).join('\n') || 'No process output yet.'}</pre>
+    <h3>HMR checks</h3><div className="runtime-card hmr-results">{dev?.hmrVerification ? <><strong>{dev.hmrVerification.state ?? `${dev.hmrVerification.impactedTasks} task${dev.hmrVerification.impactedTasks === 1 ? '' : 's'} checked after file update`}</strong>{dev.hmrVerification.reason && <span>{dev.hmrVerification.reason}</span>}{dev.hmrVerification.changedFiles?.map((file) => <code key={file}>{file}</code>)}{dev.hmrVerification.results?.map((item) => <div key={item.taskId} className={`hmr-result ${item.status}`}><strong>{item.status.replaceAll('_', ' ')}</strong><span>{item.summary}</span></div>)}<small>Anchor checks confirm presence only; visual and interaction correctness still need review.</small></> : <span>Waiting for a source file change. Checks are limited to tasks with linked source paths and the currently observed route.</span>}</div>
     <h3>Browser diagnostics</h3><p>{browserContext ? `${browserContext.title || browserContext.url} · ${browserContext.viewport.width}×${browserContext.viewport.height}` : 'Enable live page inspection in Agents settings to collect browser diagnostics.'}</p>
     <div className="runtime-card browser-problems" aria-label="Browser problems">{browserDiagnostics.length ? browserDiagnostics.slice(-30).reverse().map((entry, index) => <div key={`${entry.at}:${index}`}><strong>{entry.kind}</strong><span>{entry.message}</span><small>{entry.url}</small></div>) : <span>No recent browser errors or failed requests.</span>}</div>
   </section>;

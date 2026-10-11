@@ -50,6 +50,8 @@ try {
   await shareCard.getByRole('button', { name: 'Create link' }).click();
   assert.match(await shareCard.locator('input[type="url"]').inputValue(), /^https:\/\//);
   await shareCard.getByPlaceholder('Paste ADMIN_SECRET').waitFor();
+  assert.match(await shareCard.innerText(), /exposes the current preview/);
+  assert.equal(await shareCard.getByRole('button', { name: 'Create share link' }).isDisabled(), true);
   await shareCard.getByRole('button', { name: 'Close' }).click();
 
   // Device presets change the actual browsing context, and reference matching
@@ -146,6 +148,17 @@ try {
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.edits.some((edit) => edit.property === 'padding' && edit.after === '16px'));
   assert.equal(await frame.locator('#pay').evaluate((el) => getComputedStyle(el).padding), '16px');
   await page.getByRole('button', { name: 'Design', exact: true }).click();
+  // Reselect through page inspection so the overlay has the live element handle.
+  await page.getByRole('button', { name: /Feedback/ }).click();
+  await page.getByRole('button', { name: 'Inspect', exact: true }).click();
+  await frame.locator('#pay').click();
+  await page.waitForFunction(() => !!document.querySelector('#sel-selector')?.textContent.trim());
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await frame.evaluate(() => { window.__UIDIT_STATE_FIXTURES__ = { loading(element) { element.dataset.uiditState = 'loading'; return () => { delete element.dataset.uiditState; }; } }; });
+  await page.getByRole('button', { name: 'Loading', exact: true }).click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.dataset.uiditState === 'loading');
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await frame.waitForFunction(() => !document.querySelector('#pay')?.dataset.uiditState);
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
   await frame.waitForFunction(() => document.activeElement?.id === 'pay');
   await page.getByRole('button', { name: 'Disabled', exact: true }).click();
@@ -315,13 +328,16 @@ try {
   // intercept the browser pointer before the recording handler sees it.
   await frame.locator('.card p').first().evaluate((element) => element.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })));
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.flows?.some((flow) => flow.steps.length > 0));
+  await page.getByLabel('CSS selector').fill('#pay');
+  await page.getByRole('button', { name: 'Add assertion' }).click();
   await page.getByRole('button', { name: 'Stop and save' }).click();
   await page.getByRole('button', { name: 'Replay flow' }).click();
   await page.locator('.flow-result').waitFor({ timeout: 10000 });
-  assert.equal((await page.locator('.flow-result').innerText()).split('\n')[0], 'Passed 1 step(s)', await page.locator('.flow-result').innerText());
+  assert.equal((await page.locator('.flow-result').innerText()).split('\n')[0], 'Passed 2 step(s)', await page.locator('.flow-result').innerText());
   const recordedFlow = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).flows[0];
   assert.equal(recordedFlow.status, 'recorded');
   assert.equal(recordedFlow.steps[0].type, 'click');
+  assert.equal(recordedFlow.steps[1].type, 'assertion');
   assert.ok(recordedFlow.steps[0].screenshotUrl, 'recorded step should include a page screenshot');
   const flowScreenshot = await fetch(`http://127.0.0.1:${DASH}${recordedFlow.steps[0].screenshotUrl}`);
   assert.equal(flowScreenshot.status, 200);
@@ -342,6 +358,28 @@ try {
     await moreMenu.getByRole('button', { name: new RegExp(`^${label}`) }).click();
     await page.locator('.workspace-content').waitFor();
   }
+  await moreMenu.locator('summary').click();
+  await moreMenu.getByRole('button', { name: /^Server/ }).click();
+  await page.getByText('Configure services', { exact: true }).click();
+  const managedServiceCommand = "const h=require('node:http');const s=h.createServer((q,r)=>r.end('service'));s.listen(0,'127.0.0.1',()=>console.log('http://127.0.0.1:'+s.address().port))";
+  await page.getByLabel('Services JSON').fill(JSON.stringify([{ id: 'api', name: 'Test API', command: ['node', '-e', managedServiceCommand], cwd: '.', dependencies: [] }]));
+  await page.getByRole('button', { name: 'Save services' }).click();
+  await page.getByRole('button', { name: 'Start all' }).click();
+  await page.waitForFunction(async () => (await (await fetch('/api/services')).json()).services[0]?.state === 'ready');
+  const primaryTarget = await page.evaluate(async () => (await (await fetch('/api/state')).json()).config.targetUrl);
+  await page.getByRole('button', { name: 'Preview Test API' }).click();
+  await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).config.targetUrl?.includes('127.0.0.1:'));
+  const serviceTarget = await page.evaluate(async () => (await (await fetch('/api/state')).json()).config.targetUrl);
+  assert.notEqual(serviceTarget, primaryTarget, 'service preview should switch the active target');
+  await page.getByRole('button', { name: 'Stop owned services' }).click();
+  await page.waitForFunction(async () => (await (await fetch('/api/services')).json()).services[0]?.state === 'stopped');
+  await page.evaluate(async (targetUrl) => fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetUrl }) }), primaryTarget);
+  await page.reload();
+  for (let i = 0; i < 60 && !page.frames().some((item) => item.url().includes('/proxy/')); i++) await page.waitForTimeout(100);
+  frame = page.frames().find((item) => item.url().includes('/proxy/'));
+  assert.ok(frame, 'primary preview should reload after switching back from the service');
+  await moreMenu.locator('summary').click();
+  await moreMenu.getByRole('button', { name: /^Settings/ }).click();
   await page.locator('#uidit-position').selectOption('bottom-right');
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).config.ui.position === 'bottom-right');
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();

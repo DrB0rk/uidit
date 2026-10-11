@@ -17,12 +17,12 @@ function writeState(cwd, state) {
 export class CollaborationManager {
   constructor({ cwd, hub }) {
     this.cwd = cwd; this.hub = hub; this.config = readState(cwd); this.socket = null; this.closed = false;
-    this.connected = false; this.participants = []; this.lastError = null; this.retry = null; this.retryCount = 0;
+    this.connected = false; this.participants = []; this.activity = []; this.lastError = null; this.retry = null; this.retryCount = 0;
     this.unsubscribe = hub.subscribe?.((type, session) => { if (type === 'session' && session) this.send({ type: 'sync', session }); });
     this.connect();
   }
   status() {
-    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, participants: this.participants, error: this.lastError };
+    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, inviteExpiresAt: this.config?.inviteExpiresAt ?? null, participants: this.participants, activity: this.activity, error: this.lastError };
   }
   update() { this.hub.notifyCollaboration?.(this.status()); }
   async createRoom({ relayUrl, adminSecret, project }) {
@@ -35,8 +35,21 @@ export class CollaborationManager {
     const response = await fetch(new URL('/api/rooms', endpoint), { method: 'POST', headers: { authorization: `Bearer ${adminSecret}`, 'content-type': 'application/json' }, body: JSON.stringify({ project }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Relay room creation failed (${response.status})`);
-    this.config = { relayUrl: endpoint.origin, roomId: data.roomId, ownerToken: data.ownerToken, inviteUrl: data.inviteUrl, project };
+    this.config = { relayUrl: endpoint.origin, roomId: data.roomId, ownerToken: data.ownerToken, inviteUrl: data.inviteUrl, inviteExpiresAt: data.inviteExpiresAt, project };
     writeState(this.cwd, this.config); this.lastError = null; this.connect(); this.update();
+    return this.status();
+  }
+  async revokeInvite() {
+    if (!this.config?.roomId || !this.config?.ownerToken) throw new Error('No active review link');
+    const response = await fetch(new URL(`/api/rooms/${this.config.roomId}/revoke-invite`, this.config.relayUrl), { method: 'POST', headers: { authorization: `Bearer ${this.config.ownerToken}` } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Could not revoke review link (${response.status})`);
+    this.config.inviteUrl = data.inviteUrl;
+    this.config.inviteExpiresAt = data.inviteExpiresAt;
+    writeState(this.cwd, this.config);
+    this.participants = [];
+    this.activity = [{ type: 'session-revoked', name: 'You', text: 'Link rotated and prior participants disconnected', at: new Date().toISOString() }, ...this.activity].slice(0, 50);
+    this.update();
     return this.status();
   }
   connect() {
@@ -48,13 +61,13 @@ export class CollaborationManager {
     socket.addEventListener('message', (event) => {
       let message; try { message = JSON.parse(String(event.data)); } catch { return; }
       if (message.type === 'connected') {
-        this.retryCount = 0; this.connected = true; this.lastError = null; this.participants = message.room?.participants ?? []; this.update();
+        this.retryCount = 0; this.connected = true; this.lastError = null; this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.update();
         this.send({ type: 'sync', session: readSession(this.cwd) });
       } else if (message.type === 'snapshot' || message.type === 'presence') {
         const prior = JSON.stringify(readSession(this.cwd).comments);
         try { mergeCollaborativeSession(this.cwd, message.room?.session); } catch (error) { this.lastError = error.message; }
         const current = readSession(this.cwd);
-        this.participants = message.room?.participants ?? []; this.update();
+        this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.update();
         if (JSON.stringify(current.comments) !== prior) this.hub.notify();
       }
     });

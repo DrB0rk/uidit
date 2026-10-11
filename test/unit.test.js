@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import * as store from '../src/server/store.js';
 import { injectIntoHtml } from '../src/server/server.js';
 import { triageFeedback } from '../src/server/triage.js';
@@ -11,6 +12,8 @@ import * as taskStore from '../src/server/tasks.js';
 import { impactGraph, gitContext, projectContext } from '../src/server/project-context.js';
 import { auditBrowserContext } from '../src/server/audit.js';
 import { exportFlowAsPlaywright } from '../src/server/flow-export.js';
+import { createServiceManager } from '../src/server/process-manager.js';
+import { createSelectiveVerifier } from '../src/server/verification.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -142,17 +145,73 @@ test('live audit distinguishes measured findings, candidate contrast, and untest
   assert.equal(report.coverage.keyboard, 'not_checked');
 });
 
+test('workspace services validate isolation and start dependencies in order with independent ownership', async (t) => {
+  const cwd = tmpProject();
+  const portFor = async () => {
+    const server = net.createServer();
+    return new Promise((resolve) => server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }));
+  };
+  const commandFor = (port) => ['node', '-e', `const h=require('node:http');const s=h.createServer((q,r)=>r.end('ok'));s.listen(${port},'127.0.0.1',()=>console.log('http://127.0.0.1:${port}'))`];
+  const apiPort = await portFor(), webPort = await portFor();
+  const manager = createServiceManager({ cwd });
+  t.after(() => manager.stopAll());
+  assert.throws(() => manager.configure([{ id: 'a', command: ['node', '-e', ''], cwd: '../outside' }]), /inside the project/);
+  const outside = tmpProject(); fs.symlinkSync(outside, path.join(cwd, 'linked-outside'), 'dir');
+  assert.throws(() => manager.configure([{ id: 'a', command: ['node', '-e', ''], cwd: 'linked-outside' }]), /inside the project/);
+  assert.throws(() => manager.configure([{ id: 'a', command: ['node'], dependencies: ['b'] }, { id: 'b', command: ['node'], dependencies: ['a'] }]), /cycle/);
+  manager.configure([
+    { id: 'api', name: 'API', command: commandFor(apiPort), cwd: '.', dependencies: [] },
+    { id: 'web', name: 'Frontend', command: commandFor(webPort), cwd: '.', dependencies: ['api'] },
+  ]);
+  const status = await manager.start('web');
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(manager.status().map((service) => service.state), ['ready', 'ready']);
+  assert.equal(manager.status().every((service) => service.owned), true);
+  await manager.stopAll();
+  assert.deepEqual(manager.status().map((service) => service.state), ['stopped', 'stopped']);
+  assert.doesNotThrow(() => manager.configure([]));
+});
+
+test('HMR verifier selectively checks linked anchors on the observed route without claiming visual correctness', async (t) => {
+  const cwd = tmpProject(); store.init(cwd); store.writeConfig(cwd, { ui: { allowBrowserInspection: true } });
+  const element = store.upsertElement(cwd, { selector: '#checkout', tag: 'button', page: 'http://127.0.0.1:3000/checkout', sourceFile: 'src/Checkout.jsx' });
+  const comment = store.addComment(cwd, { text: 'Review checkout button', page: element.page, elementId: element.id });
+  const task = taskStore.createTask(cwd, { title: 'Review checkout', commentIds: [comment.id] });
+  taskStore.updateTask(cwd, task.id, { changedFiles: ['src/Checkout.jsx'] }, { expectedRevision: 1 });
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  let context = { url: element.page, nodes: [{ selector: '#checkout' }] };
+  const devEvents = [];
+  const hub = { get browserContext() { return context; }, notifyDev: (event) => devEvents.push(event), notify() {} };
+  const verifier = createSelectiveVerifier({ cwd, hub, quietPeriod: 250 }); verifier.start();
+  t.after(() => verifier.close());
+  assert.equal(verifier.watching, true);
+  const waitForEvidence = async (count) => { for (let i = 0; i < 100; i++) { const current = store.readSession(cwd); if (current.evidence.length >= count) return current.evidence.at(-1); await new Promise((resolve) => setTimeout(resolve, 20)); } throw new Error('timed out waiting for selective HMR evidence'); };
+  fs.writeFileSync(path.join(cwd, 'src/Checkout.jsx'), 'updated');
+  const present = await waitForEvidence(1);
+  assert.equal(present.result, 'note');
+  assert.match(present.summary, /still need review/);
+  context = { url: element.page, nodes: [] };
+  fs.writeFileSync(path.join(cwd, 'src/Checkout.jsx'), 'updated again');
+  const missing = await waitForEvidence(2);
+  assert.equal(missing.result, 'failed');
+  assert.deepEqual(missing.metadata.missingSelectors, ['#checkout']);
+  assert.equal(devEvents.at(-1).hmrVerification.impactedTasks, 1);
+  verifier.close();
+});
+
 test('Playwright export makes selector drift explicit and never exports recorded input values', () => {
   const code = exportFlowAsPlaywright({ name: 'Safe checkout', steps: [
     { action: 'navigate', type: 'navigation', page: 'http://localhost:3000/checkout?token=private' },
     { action: 'fill', selector: '#email', label: 'Email', value: 'private@example.com', sensitive: false },
     { action: 'fill', selector: '#password', label: 'Password', value: 'secret', sensitive: true },
     { action: 'click', selector: '#continue' },
+    { type: 'assertion', action: 'assertVisible', selector: '#confirmation', value: '' },
   ] });
   assert.match(code, /Selector drift at recorded step 2/);
   assert.match(code, /UIDIT_FLOW_VALUE_1/);
   assert.doesNotMatch(code, /private@example\.com|secret|token=private/);
   assert.match(code, /\.toHaveCount\(1\)/);
+  assert.match(code, /toBeVisible/);
 });
 
 test('comments default to unresolved and can be resolved by id', () => {

@@ -59,7 +59,7 @@ export function useSession() {
       const next = payload.config ?? payload;
       setConfig((current) => ({ ...next, previewUrl: next.previewUrl ?? current?.previewUrl ?? `http://127.0.0.1:${next.previewPort ?? 7717}` }));
     });
-    source.addEventListener('dev', (ev) => { if (!closed) setDev(JSON.parse(ev.data)); });
+    source.addEventListener('dev', (ev) => { if (!closed) setDev((current) => ({ ...current, ...JSON.parse(ev.data) })); });
     source.addEventListener('mcp', (ev) => { if (!closed) setMcp(JSON.parse(ev.data)); });
     source.addEventListener('selection', (ev) => { if (!closed) setSelection(JSON.parse(ev.data)); });
     source.addEventListener('collaboration', (ev) => { if (!closed) setCollaboration(JSON.parse(ev.data)); });
@@ -98,9 +98,18 @@ export function useSession() {
       if (!['start', 'stop', 'restart'].includes(action)) throw new Error('unsupported server action');
       return req(`/api/dev/${action}`, 'POST', {});
     },
+    serviceAction: (id, action) => {
+      if (!['start', 'stop'].includes(action)) throw new Error('unsupported workspace service action');
+      return req(`/api/services/${encodeURIComponent(id)}/${action}`, 'POST', {});
+    },
+    serviceGroupAction: (action) => {
+      if (!['start-all', 'stop-all'].includes(action)) throw new Error('unsupported workspace services action');
+      return req(`/api/services/${action}`, 'POST', {});
+    },
     mcp: () => req('/api/mcp'),
     selectElement: (selection) => req('/api/selection', 'POST', selection),
     createCollaborationRoom: (body) => req('/api/collaboration/room', 'POST', body),
+    revokeCollaborationInvite: () => req('/api/collaboration/revoke-invite', 'POST', {}),
     createFlow: (name) => withSession(req('/api/flows', 'POST', { name })),
     addFlowStep: (flowId, step) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/steps`, 'POST', step)),
     addFlowLog: (flowId, log) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/logs`, 'POST', log)),

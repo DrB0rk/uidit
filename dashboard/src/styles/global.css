@@ -629,6 +629,21 @@ kbd {
 .runtime-input { width: 100%; min-height: 36px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--fg); background: var(--raised); font: var(--text-base) var(--mono); }
 .command-input { min-height: 76px; resize: vertical; }
 .runtime-logs { max-height: 220px; overflow: auto; margin: 0; padding: 11px; border: 1px solid var(--border); border-radius: var(--r-md); color: #a7c9b6; background: #111319; font: 10px/1.8 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-services { display:grid; gap:10px; }
+.service-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.service-list > li { display:grid; grid-template-columns:minmax(0,1fr) auto auto auto; align-items:center; gap:7px; padding:9px; border:1px solid var(--border); border-radius:var(--r-md); }
+.service-list > li > div:first-child { display:grid; gap:3px; min-width:0; }
+.service-list small,.service-list code { overflow-wrap:anywhere; color:var(--fg-muted); font:10px/1.5 var(--mono); }
+.service-list details { grid-column:1/-1; width:100%; }
+.service-config { border-top:1px solid var(--border); padding-top:8px; }
+.service-config summary { cursor:pointer; color:var(--fg); font-size:12px; font-weight:600; }
+.service-config .command-input { min-height:150px; }
+.hmr-results { display:grid; gap:6px; overflow-wrap:anywhere; font-size:11px; }
+.hmr-results code { color:var(--fg-muted); font:10px/1.5 var(--mono); }
+.hmr-results small { color:var(--fg-muted); line-height:1.45; }
+.hmr-result { display:grid; gap:3px; padding:7px; border-radius:var(--r-sm); background:var(--raised); }
+.hmr-result strong { text-transform:capitalize; }
+.hmr-result.failed strong { color:var(--danger-text); }
 .runtime-muted { color: var(--fg-muted); font-size: 11px; margin: 8px 0 10px; }
 .permission-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 13px 0; border-bottom: 1px solid var(--border); }
 .permission-row strong,.permission-row small { display: block; }
@@ -672,6 +687,12 @@ kbd {
 .share-review-link input,.share-review-form input { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--border); border-radius:7px; padding:7px 8px; color:var(--fg); background:var(--surface); font:11px var(--font-mono,monospace); }
 .share-review-form { display:grid; gap:8px; margin:10px 0 0 39px; }
 .share-review-form label { display:grid; gap:4px; color:var(--fg-muted); font-size:10px; }
+.share-review-form label.share-exposure-ack { display:flex; grid-template-columns:auto 1fr; align-items:flex-start; gap:8px; line-height:1.45; }
+.share-exposure-ack input { width:auto; margin:2px 0 0; accent-color:var(--accent); }
+.share-review-activity { margin:8px 0 0 39px; color:var(--fg-muted); font-size:10px; }
+.share-review-activity summary { cursor:pointer; font-weight:650; }
+.share-review-activity ul { display:grid; gap:5px; margin:7px 0 0; padding-left:16px; }
+.share-review-activity time { opacity:.7; }
 .share-review-form small { margin-top:-3px; }
 .design-panel { max-width:680px; margin:0 auto; }
 .design-panel-heading,.design-tools-heading,.reference-card > div,.reference-opacity { display:flex; align-items:center; justify-content:space-between; gap:10px; }

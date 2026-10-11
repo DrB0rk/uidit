@@ -41,6 +41,7 @@ function ShareReview({ collaboration, actions, onStatus, busy, setBusy }) {
   const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
   const [adminSecret, setAdminSecret] = useState('');
   const [showSetup, setShowSetup] = useState(false);
+  const [externalAck, setExternalAck] = useState(false);
   const create = async (event) => {
     event.preventDefault();
     try {
@@ -56,12 +57,19 @@ function ShareReview({ collaboration, actions, onStatus, busy, setBusy }) {
     try { await navigator.clipboard.writeText(collaboration.inviteUrl); onStatus('Share link copied', 'ok'); }
     catch { onStatus('Clipboard blocked by the browser', 'error'); }
   };
+  const revoke = async () => {
+    if (!window.confirm('Rotate this review link and disconnect everyone currently reviewing? The old link will stop working.')) return;
+    try { setBusy(true); await actions.revokeCollaborationInvite(); onStatus('Review link rotated; previous participants disconnected', 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setBusy(false); }
+  };
   return <section className="share-review" aria-label="Share team review">
     <div className="share-review-top"><span className="share-review-icon"><Users size={15} aria-hidden="true" /></span><div><strong>Team review</strong><small>{collaboration?.enabled ? `${collaboration.participants?.length ?? 0} online · ${collaboration.connected ? 'Live' : 'Reconnecting'}` : 'Invite someone to review this page'}</small></div>
       {collaboration?.inviteUrl ? <button type="button" className="btn primary sm" onClick={copy}><Copy size={13} />Copy link</button> : <button type="button" className="btn sm" onClick={() => setShowSetup((value) => !value)}><Link2 size={13} />{showSetup ? 'Close' : 'Create link'}</button>}
     </div>
-    {collaboration?.inviteUrl && <div className="share-review-link"><input aria-label="Team review share link" readOnly value={collaboration.inviteUrl} onFocus={(event) => event.target.select()} /><span>{collaboration.error || collaboration.project}</span></div>}
-    {showSetup && !collaboration?.inviteUrl && <form className="share-review-form" onSubmit={create}><label>Cloudflare relay URL<input type="url" value={relayUrl} onChange={(event) => setRelayUrl(event.target.value)} required /></label><label>Relay admin secret<input type="password" value={adminSecret} onChange={(event) => setAdminSecret(event.target.value)} minLength={24} autoComplete="off" placeholder="Paste ADMIN_SECRET" required /></label><small>UIDIT sends the secret over HTTPS to create this room. It is not saved.</small><button type="submit" className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create share link'}</button></form>}
+    {collaboration?.inviteUrl && <div className="share-review-link"><input aria-label="Team review share link" readOnly value={collaboration.inviteUrl} onFocus={(event) => event.target.select()} /><span>{collaboration.error || collaboration.project} · reviewer access: comment only · expires {collaboration.inviteExpiresAt ? new Date(collaboration.inviteExpiresAt).toLocaleDateString() : 'unknown'}</span><button type="button" className="btn sm danger" disabled={busy} onClick={revoke}>Revoke and rotate link</button></div>}
+    {collaboration?.activity?.length > 0 && <details className="share-review-activity"><summary>Recent review activity</summary><ul>{collaboration.activity.slice(0, 5).map((item) => <li key={item.id ?? `${item.type}-${item.at}`}><strong>{item.name}</strong> {item.type.replaceAll('-', ' ')} · <time>{new Date(item.at).toLocaleTimeString()}</time></li>)}</ul></details>}
+    {showSetup && !collaboration?.inviteUrl && <form className="share-review-form" onSubmit={create}><label>Cloudflare relay URL<input type="url" value={relayUrl} onChange={(event) => setRelayUrl(event.target.value)} required /></label><label>Relay admin secret<input type="password" value={adminSecret} onChange={(event) => setAdminSecret(event.target.value)} minLength={24} autoComplete="off" placeholder="Paste ADMIN_SECRET" required /></label><small>UIDIT sends the secret over HTTPS to create this room. It is not saved. Remote reviewers can add comments and replies but cannot access local tools.</small><label className="share-exposure-ack"><input type="checkbox" checked={externalAck} onChange={(event) => setExternalAck(event.target.checked)} required /><span>I understand this exposes the current preview and its review data to anyone with the link for 7 days.</span></label><button type="submit" className="btn primary" disabled={busy || !externalAck}>{busy ? 'Creating…' : 'Create share link'}</button></form>}
   </section>;
 }
 

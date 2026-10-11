@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-10-11
+
+- Added project-scoped multi-service management with dependency-aware start/stop, separate logs, isolated process ownership, and preview switching.
+- Added selective HMR verification that checks linked anchors on the observed route and labels results as evidence rather than visual approval.
+- Added browser-flow assertions for visibility, text, enabled state, and routes, with Playwright export that flags selector drift.
+- Added reversible app-provided component state fixtures for loading, error, empty, success, open, closed, and selected states.
+- Hardened remote reviews with seven-day invite expiry, owner-only session rotation, disconnect-on-revoke, comment-only reviewer permissions, explicit exposure acknowledgement, and visible activity history.
+- Expanded E2E and unit coverage for service lifecycle, HMR evidence, flow assertions, state fixtures, and responsive workspace behavior.
+
 ## 0.6.0 — 2026-10-11
 
 - Added route-scoped durable element IDs, recoverable comment anchors, v1 session backups, explicit reattachment, and missing/ambiguous anchor states.

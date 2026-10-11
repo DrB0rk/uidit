@@ -8,11 +8,12 @@ import * as store from '../src/server/store.js';
 import { startServer } from '../src/server/server.js';
 import { discoverTargets } from '../src/server/discover.js';
 import { resolveDevCommand } from '../src/server/command-resolver.js';
-import { createProcessManager } from '../src/server/process-manager.js';
+import { createProcessManager, createServiceManager } from '../src/server/process-manager.js';
 import { startMcpServer, readMcpToken, runStdioBridge } from '../src/server/mcp/server.js';
 import { acquireProjectLock } from '../src/server/runtime-lock.js';
 import { createHub } from '../src/server/realtime.js';
 import { CollaborationManager } from '../src/server/collaboration.js';
+import { createSelectiveVerifier } from '../src/server/verification.js';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(PKG_ROOT, 'dashboard', 'dist');
@@ -79,14 +80,20 @@ const commands = {
       hub?.notifyDev(status);
       if (status.url && status.url !== store.readConfig(cwd)?.targetUrl) { store.writeConfig(cwd, { targetUrl: status.url, dev: { url: status.url } }); hub?.notifyConfig(); }
     } });
+    const serviceManager = createServiceManager({ cwd, onChange: (services) => hub?.notifyDev({ services }) });
+    serviceManager.configure(initialConfig?.services ?? []);
+    const verifier = createSelectiveVerifier({ cwd, hub, onError: (error) => hub?.notifyDev({ hmrVerification: { state: 'unsupported', reason: error.message } }) });
     const preview = await startServer({ cwd, port: configuredPreviewPort, controlPort: port, previewOnly: true, hub, collaborationManager });
     let mcp;
-    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, hub, collaborationManager }); }
+    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, serviceManager, hub, collaborationManager }); }
     catch (err) { collaborationManager.close(); hub.close(); preview.server.close(); throw err; }
+    verifier.start();
     let stopping = false;
     const bye = async () => {
       if (stopping) return;
       stopping = true;
+      verifier.close();
+      await serviceManager.stopAll();
       await processManager.stop();
       collaborationManager.close();
       hub.close(); await mcp.close(); preview.server.close();

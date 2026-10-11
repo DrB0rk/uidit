@@ -11,6 +11,7 @@ const secureEqual = (left, right) => {
   return mismatch === 0;
 };
 const validSession = (session) => session && typeof session === 'object' && Array.isArray(session.comments) && Array.isArray(session.elements) && Array.isArray(session.edits) && JSON.stringify(session).length <= 8_000_000;
+const inviteExpiry = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
 export default {
   async fetch(request, env) {
@@ -31,6 +32,14 @@ export default {
     if (request.method === 'POST' && join) {
       const stub = env.ROOMS.getByName(join[1]);
       return stub.fetch(new Request('https://room.internal/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: await request.text() }));
+    }
+    const revoke = url.pathname.match(/^\/api\/rooms\/([a-f0-9-]+)\/revoke-invite$/i);
+    if (request.method === 'POST' && revoke) {
+      const stub = env.ROOMS.getByName(revoke[1]);
+      const response = await stub.fetch(new Request('https://room.internal/revoke-invite', { method: 'POST', headers: { authorization: request.headers.get('authorization') ?? '' } }));
+      if (!response.ok) return response;
+      const credentials = await response.json();
+      return json({ ...credentials, inviteUrl: `${url.origin}/room/${revoke[1]}#${credentials.inviteToken}` });
     }
     const socket = url.pathname.match(/^\/api\/rooms\/([a-f0-9-]+)\/socket$/i);
     if (request.method === 'GET' && socket) {
@@ -67,15 +76,32 @@ export class CollaborationRoom extends DurableObject {
       const { roomId, project } = await request.json();
       const ownerToken = randomToken(); const inviteToken = randomToken();
       const now = new Date().toISOString();
-      const state = { roomId, project, createdAt: now, ownerHash: await digest(ownerToken), inviteHash: await digest(inviteToken), members: [], ownerRevision: -1, session: { version: 1, revision: 0, updatedAt: now, elements: [], comments: [], edits: [] }, activity: [] };
+      const expiresAt = inviteExpiry();
+      const state = { roomId, project, createdAt: now, ownerHash: await digest(ownerToken), inviteHash: await digest(inviteToken), inviteExpiresAt: expiresAt, members: [], ownerRevision: -1, session: { version: 1, revision: 0, updatedAt: now, elements: [], comments: [], edits: [] }, activity: [] };
       this.saveState(state);
-      return json({ roomId, ownerToken, inviteToken });
+      return json({ roomId, ownerToken, inviteToken, inviteExpiresAt: expiresAt });
+    }
+    if (url.pathname === '/revoke-invite' && request.method === 'POST') {
+      const state = await this.readState(); if (!state) return json({ error: 'room not found' }, 404);
+      const ownerToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+      if (!secureEqual(await digest(ownerToken), state.ownerHash)) return json({ error: 'unauthorized' }, 401);
+      const inviteToken = randomToken();
+      state.inviteHash = await digest(inviteToken);
+      state.inviteExpiresAt = inviteExpiry();
+      state.members = [];
+      this.note(state, 'session-revoked', 'Project owner', 'Review link rotated; previous participants and link revoked');
+      this.saveState(state);
+      for (const socket of this.ctx.getWebSockets('room')) {
+        if (socket.deserializeAttachment()?.role === 'member') socket.close(1008, 'Review access revoked');
+      }
+      return json({ inviteToken, inviteExpiresAt: state.inviteExpiresAt });
     }
     if (url.pathname === '/join' && request.method === 'POST') {
       const state = await this.readState(); if (!state) return json({ error: 'room not found' }, 404);
       let body;
       try { body = await request.json(); } catch { return json({ error: 'invalid JSON' }, 400); }
       if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80 || typeof body.inviteToken !== 'string') return json({ error: 'name and invite token are required' }, 400);
+      if (!state.inviteExpiresAt || Date.parse(state.inviteExpiresAt) <= Date.now()) return json({ error: 'invite link expired' }, 410);
       if (!secureEqual(await digest(body.inviteToken), state.inviteHash)) return json({ error: 'invalid or revoked invite link' }, 401);
       if (state.members.length >= 200) return json({ error: 'room member limit reached' }, 429);
       const memberToken = randomToken(); const memberId = crypto.randomUUID();
@@ -156,17 +182,6 @@ export class CollaborationRoom extends DurableObject {
       comment.replies = [...(comment.replies ?? []), reply]; comment.updatedAt = now;
       state.session.revision += 1; state.session.updatedAt = now; this.note(state, 'reply', member.name, comment.text);
       return { type: 'comment:reply', commentId: comment.id, reply };
-    }
-    if (body.type === 'comment:update') {
-      let changed = false;
-      if (['open', 'in_progress', 'needs_info'].includes(body.status)) { comment.status = body.status; comment.resolved = false; changed = true; }
-      if (typeof body.assignee === 'string' && body.assignee.length <= 80) { comment.assignee = body.assignee || null; changed = true; }
-      if (body.assignee === null) { comment.assignee = null; changed = true; }
-      if (body.resolved === true || body.resolved === false) { comment.resolved = body.resolved; changed = true; }
-      if (!changed) return null;
-      comment.updatedAt = now; state.session.revision += 1; state.session.updatedAt = now;
-      this.note(state, body.assignee !== undefined ? 'assigned' : body.resolved ? 'resolved' : 'status', member.name, comment.text);
-      return { type: 'comment:update', commentId: comment.id, patch: { status: comment.status, assignee: comment.assignee ?? null, resolved: comment.resolved, updatedAt: now } };
     }
     return null;
   }
