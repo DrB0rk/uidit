@@ -1,0 +1,204 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+export const UIDIT_DIR = '.uidit';
+
+export function projectRoot(cwd = process.cwd()) {
+  return path.resolve(cwd);
+}
+
+export function uiditDir(cwd = process.cwd()) {
+  return path.join(projectRoot(cwd), UIDIT_DIR);
+}
+
+export function isInitialized(cwd = process.cwd()) {
+  return fs.existsSync(path.join(uiditDir(cwd), 'config.json'));
+}
+
+const EMPTY = () => ({ version: 1, updatedAt: null, elements: [], comments: [], edits: [] });
+
+function writeAtomic(file, contents) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, contents);
+  fs.renameSync(tmp, file);
+}
+
+export function init(cwd = process.cwd(), { force = false } = {}) {
+  const dir = uiditDir(cwd);
+  const configFile = path.join(dir, 'config.json');
+  if (fs.existsSync(configFile) && !force) return { created: false, dir, config: readConfig(cwd) };
+  fs.mkdirSync(dir, { recursive: true });
+  const config = {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    dashboardPort: 7717,
+    targetUrl: null,
+  };
+  writeAtomic(configFile, `${JSON.stringify(config, null, 2)}\n`);
+  writeAtomic(path.join(dir, 'session.json'), `${JSON.stringify(EMPTY(), null, 2)}\n`);
+  const readme = path.join(dir, 'README.md');
+  if (!fs.existsSync(readme) || force) fs.writeFileSync(readme, AGENT_README);
+  return { created: true, dir, config };
+}
+
+export function readConfig(cwd = process.cwd()) {
+  const file = path.join(uiditDir(cwd), 'config.json');
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+export function writeConfig(cwd, patch) {
+  const config = { ...(readConfig(cwd) ?? { version: 1 }), ...patch };
+  writeAtomic(path.join(uiditDir(cwd), 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+  return config;
+}
+
+export function readSession(cwd = process.cwd()) {
+  const file = path.join(uiditDir(cwd), 'session.json');
+  if (!fs.existsSync(file)) return EMPTY();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { ...EMPTY(), ...parsed };
+  } catch {
+    return EMPTY();
+  }
+}
+
+export function writeSession(cwd, session) {
+  const next = { ...session, version: 1, updatedAt: new Date().toISOString() };
+  fs.mkdirSync(uiditDir(cwd), { recursive: true });
+  writeAtomic(path.join(uiditDir(cwd), 'session.json'), `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
+
+export function stableId(prefix, selector) {
+  const hash = crypto.createHash('sha1').update(selector).digest('hex').slice(0, 8);
+  return `${prefix}-${hash}`;
+}
+
+export function upsertElement(cwd, element) {
+  const session = readSession(cwd);
+  const id = element.id ?? stableId('el', element.selector);
+  const idx = session.elements.findIndex((e) => e.id === id);
+  const record = { ...(idx >= 0 ? session.elements[idx] : {}), ...element, id };
+  if (idx >= 0) session.elements[idx] = record;
+  else session.elements.push(record);
+  writeSession(cwd, session);
+  return record;
+}
+
+export function addComment(cwd, comment) {
+  const session = readSession(cwd);
+  const record = {
+    id: comment.id ?? stableId('cm', `${Date.now()}:${Math.random()}`),
+    resolved: false,
+    createdAt: new Date().toISOString(),
+    ...comment,
+  };
+  session.comments.push(record);
+  writeSession(cwd, session);
+  return record;
+}
+
+export function addEdit(cwd, edit) {
+  const session = readSession(cwd);
+  const record = {
+    id: edit.id ?? stableId('ed', `${Date.now()}:${Math.random()}`),
+    applied: false,
+    createdAt: new Date().toISOString(),
+    ...edit,
+  };
+  session.edits.push(record);
+  writeSession(cwd, session);
+  return record;
+}
+
+export function updateRecord(cwd, collection, id, patch) {
+  const session = readSession(cwd);
+  const idx = session[collection].findIndex((r) => r.id === id);
+  if (idx < 0) return null;
+  session[collection][idx] = { ...session[collection][idx], ...patch };
+  writeSession(cwd, session);
+  return session[collection][idx];
+}
+
+export function removeRecord(cwd, collection, id) {
+  const session = readSession(cwd);
+  const before = session[collection].length;
+  session[collection] = session[collection].filter((r) => r.id !== id);
+  if (session[collection].length === before) return false;
+  writeSession(cwd, session);
+  return true;
+}
+
+export const AGENT_README = `# .uidit
+
+Machine-readable record of the developer's UI review session. A coding agent should
+read \`session.json\` before making UI changes so it does not lose the user's feedback.
+
+## Files
+
+- \`config.json\` — uidit settings (\`targetUrl\`, \`dashboardPort\`).
+- \`session.json\` — the live session. See schema below.
+
+## session.json schema
+
+\`\`\`jsonc
+{
+  "version": 1,
+  "updatedAt": "ISO-8601",
+  "elements": [
+    {
+      "id": "el-a1b2c3d4",
+      "selector": "#main > div.card:nth-child(2)",   // css selector, primary handle
+      "selectorAlternatives": [".card", "div.card"], // fallbacks
+      "tag": "DIV",
+      "text": "Checkout",                          // trimmed, collapsed
+      "ancestors": ["body", "main#main"],          // tag#id chains for context
+      "attributes": { "class": "card", "data-x": "" },
+      "page": "http://localhost:3000/cart",
+      "status": "open"                             // open | resolved
+    }
+  ],
+  "comments": [
+    {
+      "id": "cm-9f2a1b0c",
+      "elementId": "el-a1b2c3d4",                   // null = page-level note
+      "page": "http://localhost:3000/cart",
+      "text": "This padding is inconsistent with the card below.",
+      "resolved": false,
+      "createdAt": "ISO-8601"
+    }
+  ],
+  "edits": [
+    {
+      "id": "ed-77ab12cd",
+      "elementId": "el-a1b2c3d4",
+      "kind": "text" | "style" | "attribute" | "class" | "remove",
+      "property": "padding",                       // style/attribute/class only
+      "before": "12px",
+      "after": "16px",
+      "applied": false,                            // applied in the browser session only
+      "page": "http://localhost:3000/cart",
+      "note": "optional",
+      "createdAt": "ISO-8601"
+    }
+  ]
+}
+\`\`\`
+
+## How an agent should use this
+
+1. Read \`session.json\`.
+2. Filter \`comments\` where \`resolved === false\`, ordered by \`createdAt\`.
+3. For each, locate the element via \`elements[].selector\` (fall back to
+   \`selectorAlternatives\`); if the element cannot be found, report the comment against
+   the nearest \`ancestors\` entry and say so explicitly.
+4. Treat every entry in \`edits\` as an explicit, user-approved change to apply in source.
+   \`before\` is what was live when the user made the change, so it doubles as a sanity check.
+5. Mark feedback resolved by setting \`resolved: true\` on the comments you handled, or by
+   running \`uidit resolve <commentId>\`. Never delete comments — they are the user's history.
+6. \`edits[].applied\` means "applied in the browser preview", NOT "applied in source". Set it to
+   \`true\` only after the change is committed to the real source files.
+`;

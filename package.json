@@ -1,0 +1,34 @@
+{
+  "name": "uidit",
+  "version": "0.1.0",
+  "description": "Local UI review dashboard: tag elements, comment, and make simple edits directly on a running dev server. Everything persists to .uidit for coding agents to read.",
+  "type": "module",
+  "bin": {
+    "uidit": "bin/uidit.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "dashboard",
+    "README.md"
+  ],
+  "scripts": {
+    "build:dashboard": "astro build --root dashboard",
+    "dev:dashboard": "astro dev --root dashboard",
+    "start": "node bin/uidit.js start",
+    "test": "node --test test/unit.test.js && node test/e2e.js"
+  },
+  "dependencies": {
+    "@astrojs/react": "^7.0.1",
+    "astro": "^7.3.8",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}
