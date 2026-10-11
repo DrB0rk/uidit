@@ -1,9 +1,21 @@
-# uidit
+<p align="center">
+  <img src="docs/banner.svg" alt="uidit — local UI review dashboard" width="100%">
+</p>
 
-Local UI review dashboard for the project you're working on. Point it at your running
-dev server, click elements in the live page, leave comments, and try quick edits — all
-of it lands in `.uidit/` in your repo so a coding agent can pick the feedback up without
-you retyping it.
+<p align="center">
+  Click elements in your running app, comment on them, try edits.<br>
+  Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
+</p>
+
+---
+
+## The problem
+
+You are reviewing UI in a browser and your agent is in a terminal. You write
+"the padding on this card looks off" in chat. The agent asks *which card*. You
+describe the selector. You describe the text. Ten minutes later, one line of CSS.
+
+uidit closes that gap. Your feedback is already structured data in the project.
 
 ## Install
 
@@ -11,96 +23,155 @@ you retyping it.
 curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
 
-Needs Node 18+ and npm. The script checks for both, installs the `uidit` command, and
-verifies it runs before it exits. To install from a clone instead: `npm install -g .`
+Needs Node 18+ and npm. The installer checks for both, installs the `uidit`
+command, and verifies it runs before exiting. From a clone instead: `npm install -g .`
 
 ## Use
 
 ```sh
-uidit init     # once, creates .uidit/
+cd your-project
+uidit init     # once — creates .uidit/
 npm run dev     # your project's dev server, in another terminal
-uidit          # start the dashboard, auto-detects local dev servers
+uidit          # dashboard at http://127.0.0.1:7717
 ```
 
-Then open <http://127.0.0.1:7717>.
+Hit **Discover** or paste a URL, then click anything in the preview.
 
-## What it does
+![uidit reviewing a running app](docs/screenshot.png)
 
-- **Discover** — enumerates every port actually listening (via `ss`), probes both IPv4
-  and IPv6 loopback, and lists what answers with HTML. Any port works, not just the
-  popular ones; paste a URL if it doesn't show up. uidit never guesses a target for you,
-  because the first listening port is often CUPS or a Docker proxy, not your app.
-- **Works with any dev server** — the page is served through a proxy that injects the
-  overlay, and it handles what real stacks do: chunked and compressed HTML, root-absolute
-  asset URLs, `/`-redirects (rewritten to stay inside the proxy), hashed bundles, JSON APIs,
-  IPv6-only binds, HMR websockets, and CSP/ETag headers that would otherwise block or
-  bypass the injection.
-- **Tag** — click any element. uidit stores a CSS selector, class-based fallbacks, an
-  ancestor chain, trimmed text, and the relevant attributes.
-- **Comment** — page-level or attached to a selected element.
-- **Quick edits** — edit text in place, apply a CSS property, toggle a class, set an
-  attribute, or remove an element. Changes apply to the preview immediately and are
-  recorded as explicit before → after edits for the agent to implement in source.
-- **Live sync** — the dashboard subscribes to an SSE stream. Feedback resolved by an
-  agent writing `.uidit/session.json` appears in the UI immediately.
+## What you get
+
+**Discover** enumerates every port actually listening, probes IPv4 and IPv6
+loopback, and lists what answers with HTML. Any port works. uidit never picks a
+target for you, because the lowest listening port is usually CUPS or a Docker
+proxy, not your app.
+
+**Tag** — click any element. uidit records a CSS selector, class-based fallbacks,
+an ancestor chain, its text, and its relevant attributes.
+
+**Comment** — on the element, or on the page as a whole.
+
+**Quick edits** — edit text in place, set a CSS property, toggle a class, set an
+attribute, hide an element. The change applies to the preview immediately and is
+saved as an explicit `before → after` record.
+
+**Live sync** — the dashboard holds an SSE connection. When an agent writes to
+`.uidit/session.json`, the UI updates without a refresh.
+
+## Any dev server
+
+uidit proxies the page and injects the inspection overlay, so there is no plugin
+to add and no change to your app. It handles what real stacks do:
+
+- root-absolute asset URLs (`/@vite/client`, `/src/main.tsx`, hashed bundles)
+- the app's own `/api/*` calls — uidit claims only its own routes
+- chunked and compressed HTML
+- `/` → `/app/` redirects, rewritten to stay inside the proxy
+- IPv6-only binds, HMR websockets, CSP and `Set-Cookie` headers that would
+  otherwise block the injected script
 
 ## For coding agents
 
-Read `.uidit/session.json` (schema and rules in `.uidit/README.md`) before touching UI
-code. Open comments are the work queue; every `edits[]` entry is a change the user
-already approved. `applied: true` means "done in source", not "touched in the browser".
+Read `.uidit/session.json` before touching UI code. The schema and the rules are
+in `.uidit/README.md`, written into every project that runs `uidit init`.
 
-CLI helpers for agents:
+```jsonc
+{
+  "elements": [{ "id": "el-a1b2c3d4", "selector": "#main > article.card",
+                 "ancestors": ["body", "main#main"], "text": "Checkout" }],
+  "comments": [{ "id": "cm-9f2a1b0c", "elementId": "el-a1b2c3d4",
+                 "text": "Padding is 12px here, 16px above.", "resolved": false }],
+  "edits":    [{ "id": "ed-77ab12cd", "kind": "style", "property": "padding",
+                 "before": "12px", "after": "16px", "applied": false }]
+}
+```
 
+The two things worth knowing:
+
+- **Open comments are the work queue.** `resolved: false`, oldest first.
+- **`edits[]` are already approved.** The user saw the change happen in the
+  preview and kept it. `applied: true` means *committed to source*, not *touched
+  in the browser* — set it yourself once you have done the work.
+
+Never delete a comment. They are the user's record of why something looks the way
+it does.
+
+Two commands help:
+
+```sh
+uidit status              # open feedback and pending edits, print only
+uidit resolve [ids…]      # mark comments resolved (all open, if no ids)
 ```
-uidit status              # open feedback + pending edits, print only
-uidit resolve [ids…]      # mark comments resolved (all open when no ids given)
-```
+
+An `uidit` skill for agents is bundled in [`skills/uidit/`](skills/uidit/) —
+copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
 
 ## Commands
 
-| Command | Purpose |
+| Command | Does |
 | --- | --- |
 | `uidit init` | create `.uidit/` in the current project |
-| `uidit start [port]` | run the dashboard (default 7717), discovers dev servers |
+| `uidit start [port]` | run the dashboard (default 7717) and discover dev servers |
 | `uidit status` | print open feedback and pending edits |
 | `uidit resolve [ids…]` | resolve comments |
 | `uidit build` | rebuild the dashboard UI |
 
-## Architecture
+Keyboard: `1` and `2` switch modes, `Cmd/Ctrl+Enter` posts a comment, `Escape`
+clears the selection.
+
+## How it works
+
+```
+your dev server :3000
+        │
+        │  reverse proxy, injects overlay.js
+        ▼
+uidit server :7717 ──── /api        REST + SSE
+        │
+        ├─── Astro dashboard UI (built to dashboard/dist)
+        └─── .uidit/session.json  ◄── your agent
+```
+
+The previewed page runs on uidit's origin, which is what makes the injection
+possible. The overlay talks to the dashboard over `postMessage` and persists
+through the same REST API the dashboard uses.
+
+### Layout
 
 ```
 bin/uidit.js            CLI
-src/server/server.js    HTTP: dashboard static assets, REST API, SSE, reverse proxy
-src/server/store.js     .uidit read/write + the agent-facing README
-src/server/discover.js  local dev-server discovery
+src/server/server.js    HTTP: static assets, REST API, SSE, reverse proxy
+src/server/store.js     .uidit read/write, and the agent-facing README
+src/server/discover.js  finds listening dev servers (ss, dual-stack)
 src/server/realtime.js  SSE hub + fs watcher on .uidit/
-src/public/overlay.js   injected into the previewed page (select / comment / edit)
-dashboard/              Astro 7 app, React island, built to dashboard/dist
+src/public/overlay.js   injected into the previewed page
+dashboard/              Astro 7 + React island
 ```
 
-The dashboard UI is an [Astro](https://astro.build) app; all runtime data comes from
-the uidit server over `fetch` + `EventSource`, so nothing is baked at build time.
+The UI is an [Astro](https://astro.build) app. All data arrives at runtime over
+`fetch` and `EventSource`; nothing is baked in at build time.
 
-## Dashboard UI
+## Accessibility
 
-Built to the [b0x](https://skills.omp.sh) UI/UX baseline and verified against it:
-
-- **Tokens** (`dashboard/src/styles/tokens.css`) are `oklch()` throughout, with the
-  accent split into a fill tone and a text tone. One tone cannot do both jobs — the
-  old `#6d5efc` was 3.98:1 as text on panels.
-- **Accessibility**: every control has an accessible name, a 2px `:focus-visible` ring,
-  and a ≥24px pointer target. Status is always paired with an icon and a label, so
-  colour is never the only signal.
-- **Keyboard**: `1` / `2` switch modes, `Cmd/Ctrl+Enter` posts a comment, `Escape`
-  closes the discover list, and tab order follows the visual layout.
-- **Motion**: transform/opacity only, honouring `prefers-reduced-motion`.
-- **Responsive**: the panel stacks under the preview below 900px; nothing overflows.
+The dashboard is built to WCAG 2.2 AA and checked against a real browser, not
+assumed: every control has an accessible name, a 2px `:focus-visible` ring, and a
+pointer target of at least 24px. Status is always paired with an icon and a label,
+so colour is never the only signal. Tokens are `oklch()` throughout, and motion
+respects `prefers-reduced-motion`.
 
 ## Development
 
 ```sh
 npm install && npm link   # provides the `uidit` command from this clone
-npm run build:dashboard   # build the UI (uidit does this on first run)
+npm run build:dashboard   # build the UI (done automatically on first run)
 npm test                  # unit, proxy, browser and cross-stack suites
 ```
+
+`npm test` runs 21 unit and proxy tests, a browser suite that drives the real
+dashboard against a fixture dev server, and a cross-stack check that renders two
+differently shaped servers — one IPv6-only with chunked HTML, one with a redirect,
+a hashed bundle and its own API.
+
+## License
+
+[MIT](LICENSE)
