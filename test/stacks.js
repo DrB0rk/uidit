@@ -62,7 +62,7 @@ for (let i = 0; i < 60; i++) {
 
 const targets = [
   { name: 'ipv6-only + chunked + root-absolute assets', url: `http://localhost:${v6.port}`, expect: 'Go' },
-  { name: 'react: redirect + hashed bundle + JSON API', url: `http://127.0.0.1:${react.port}`, expect: 'Buy now' },
+  { name: 'react: redirect + hashed bundle + own JSON API', url: `http://127.0.0.1:${react.port}`, expect: 'target' },
 ];
 
 let failures = 0;

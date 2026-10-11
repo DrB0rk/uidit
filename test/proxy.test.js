@@ -71,10 +71,33 @@ test('serves root-absolute assets from the target (vite-style)', async () => {
   assert.match(body, /export const hot/);
 });
 
+test("the previewed app's own /api routes reach the target, not uidit", async () => {
+  const { server, port } = await hostileServer((req, res) => {
+    if (req.url === '/api/status') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, from: 'target' }));
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  writeConfig(cwd, { targetUrl: `http://127.0.0.1:${port}` });
+  const res = await fetch(`http://127.0.0.1:${DASH}/api/status`);
+  const body = await res.json();
+  server.close();
+  assert.equal(res.status, 200);
+  assert.equal(body.from, 'target');
+});
+
 test('uidit still owns its own routes', async () => {
   const html = await (await fetch(`http://127.0.0.1:${DASH}/`)).text();
   assert.match(html, /uidit/);
   assert.equal((await fetch(`http://127.0.0.1:${DASH}/overlay.js`)).status, 200);
+});
+
+test("uidit's own API routes are not forwarded even with a target set", async () => {
+  const body = await (await fetch(`http://127.0.0.1:${DASH}/api/state`)).json();
+  assert.ok(body.config, 'uidit api should answer, not proxy');
+  assert.ok(Array.isArray(body.session.comments));
 });
 
 test('a dead target returns 502 instead of hanging', async () => {

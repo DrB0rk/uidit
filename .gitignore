@@ -1,3 +1,7 @@
 node_modules/
 dashboard/dist/
+dashboard/.astro/
 .uidit/
+.poldergraph/
+.bizar-omp/
+*.log

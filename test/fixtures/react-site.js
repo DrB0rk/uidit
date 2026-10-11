@@ -15,12 +15,22 @@ export function reactServer(port = 0, host = '127.0.0.1') {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/assets/index-abc123.js') {
       res.writeHead(200, { 'content-type': 'text/javascript' });
-      return res.end("document.getElementById('root').innerHTML ="
-        + " '<h1>React App</h1><button id=\"buy\">Buy now</button>';");
+      // Fetches its own API from inside the preview: these must reach the target
+      // dev server, not collide with uidit's namespace.
+      return res.end(
+        "fetch('/api/status').then(r => r.json()).then(d =>"
+        + " document.getElementById('root').innerHTML ="
+        + " '<h1>React App</h1><p id=\"who\">' + d.source + '</p>' +"
+        + " '<button id=\"buy\">Buy now</button>');",
+      );
     }
     if (url.pathname === '/api/user') {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ name: 'Ada' }));
+    }
+    if (url.pathname === '/api/status') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, source: 'target' }));
     }
     if (url.pathname === '/') {
       res.writeHead(302, { location: '/app/' });

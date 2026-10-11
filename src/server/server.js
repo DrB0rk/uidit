@@ -215,7 +215,11 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
 
       if (route === '/overlay.js') return serveStatic(res, path.join(PUBLIC_DIR, 'overlay.js'));
 
-      if (route.startsWith('/api/')) {
+      // uidit owns a fixed set of API routes. Anything else under /api/ belongs to
+      // the previewed app — real apps use /api/* too, so claiming the whole namespace
+      // would break their data loading.
+      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|edit)(?:\/|$)/;
+      if (UIDIT_API.test(route)) {
         if (route === '/api/state') {
           return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd) });
         }
@@ -264,7 +268,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
           hub.notify();
           return json(res, 200, { ok: true, session: store.readSession(cwd) });
         }
-        return json(res, 404, { error: 'unknown api route' });
+        return json(res, 404, { error: 'unknown uidit api route' });
       }
 
       if (route.startsWith('/proxy/')) {
@@ -276,11 +280,11 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         return proxyRequest(req, res, target);
       }
 
-      // The previewed page runs on uidit's origin, so its own root-absolute asset
-      // URLs (/@vite/client, /src/main.tsx, /favicon.ico) would land here and 404.
-      // Anything uidit does not own is forwarded to the target dev server.
+      // The previewed page runs on uidit's origin, so its own URLs — root-absolute
+      // assets like /@vite/client, and its own /api/* calls — would land on uidit and
+      // fail. Anything uidit does not own is forwarded to the target dev server.
       const config = store.readConfig(cwd);
-      if (config?.targetUrl && !route.startsWith('/api/')) {
+      if (config?.targetUrl) {
         const target = safeTargetUrl(config.targetUrl);
         target.pathname = `${target.pathname.replace(/\/$/, '')}${route}`;
         target.search = url.search;
