@@ -1,14 +1,15 @@
 #!/usr/bin/env sh
 # uidit installer
 #
-#   curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/master/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 #
-# Installs the `uidit` command. Requires Node 18+ and npm; if they are missing the
+# Installs the `uidit` command. Needs Node 18+ and npm; if either is missing the
 # script stops and tells you what to install rather than half-installing something.
 
 set -eu
 
 REPO="DrB0rk/uidit"
+BRANCH="master"
 MIN_NODE_MAJOR=18
 
 say()  { printf '%s\n' "$*"; }
@@ -33,31 +34,43 @@ fi
 printf '  node %s · npm %s\n' "$(node -v)" "$(npm -v)"
 
 # --- install ------------------------------------------------------------------
-# Prefer the npm registry; fall back to the GitHub source when the package is not
-# published yet or the user is working from a fork.
-if npm install -g "github:${REPO}" >/tmp/uidit-install.log 2>&1; then
-  printf '  installed from GitHub source\n'
+# Two routes, because neither works everywhere:
+#   1. the npm registry (preferred when published)
+#   2. the GitHub source tarball — npm >= 12 refuses git: installs outright, so the
+#      tarball is the route that keeps working on modern npm.
+TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
+TARBALL="$(mktemp -t uidit.XXXXXX.tar.gz)"
+trap 'rm -f "$TARBALL"' EXIT INT TERM
+
+installed=""
+if npm install -g uidit >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
+  installed="registry"
+  printf '  installed from the npm registry\n'
 else
-  warn "source install failed; see /tmp/uidit-install.log"
-  die "could not install uidit"
+  say "  installing from GitHub source"
+  curl -fsSL "$TARBALL_URL" -o "$TARBALL" || die "could not download $TARBALL_URL
+  Check the URL manually, or clone https://github.com/${REPO} and run: npm install -g ."
+  npm install -g "$TARBALL" >/dev/null 2>&1 || die "npm install failed.
+  Re-run with the log: sh -x <(curl -fsSL $0) 2>&1 | tail -40"
+  installed="source"
 fi
 
 command -v uidit >/dev/null 2>&1 || die "install completed but 'uidit' is not on PATH.
-  Add your npm global bin to PATH, e.g. export PATH=\"\$PATH:\$(npm prefix -g)/bin\"."
+  Add your npm global bin to PATH:
+    export PATH=\"\$PATH:\$(npm prefix -g)/bin\""
 
-printf '\n  %s\n' "uidit installed → $(command -v uidit)"
+printf '  %s\n' "uidit installed ($installed) → $(command -v uidit)"
 
 # --- verify it actually runs --------------------------------------------------
-if ! uidit --help >/dev/null 2>&1; then
-  die "uidit was installed but did not run. Reinstall, or report this at https://github.com/${REPO}/issues"
-fi
+uidit --help >/dev/null 2>&1 || die "uidit was installed but did not run.
+  Please report this at https://github.com/${REPO}/issues"
 
-cat <<'EOF'
+cat <<EOF
 
   Next:
     cd your-project
     uidit init      # once, creates .uidit/
     uidit           # start the dashboard, then hit Discover
 
-  Docs: https://github.com/DrB0rk/uidit#readme
+  Docs: https://github.com/${REPO}#readme
 EOF
