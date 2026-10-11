@@ -21,6 +21,11 @@ uidit status          # human-readable: open comments + pending edits
 or read `.uidit/session.json` directly (add `| head -60` if it's large). `.uidit/README.md`
 in the project documents the schema — read it if anything is unclear.
 
+If this project exposes UIDIT MCP, begin with `uidit_get_agent_brief` or the
+`uidit_work_on_feedback` prompt. The brief links each open comment to its tagged
+element, includes pending preview edits and current selection, and can be filtered
+with `focus`. Read `uidit://agent/brief` for the same live-updating context.
+
 **Check `.uidit/` before you plan, not after.** A pending item there usually *is* the
 task the user actually wants, phrased in their words. If they said "make this form
 better" and there's an open comment "the labels jump when you tab through fields",
@@ -50,8 +55,10 @@ the preview and kept it — that is pre-approved work, not a suggestion to evalu
    "handled" and "ignored".
 3. Make the change in **source**, not as an inline style in the dashboard. The dashboard
    is a preview; the repo is the product.
-4. Mark it done: set `applied: true` on the edits you implemented and `resolved: true`
-   on the comments you handled, then run `uidit resolve` if you want the CLI to do it.
+4. If MCP writes are enabled, reply in the comment thread with a question or concise
+   completion summary using `uidit_reply_comment`. Mark preview edits applied only
+   after source verification, and resolve comments only after the request is done.
+   Without MCP, use the CLI/API workflow below.
 5. Say what you did in terms of their feedback, not a file list.
 
 Never delete comments. They're the user's history and they often reference the reason

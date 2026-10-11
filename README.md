@@ -114,6 +114,15 @@ owner-only permissions; `.uidit/` is ignored by `uidit init`. MCP connections ar
 enabled by default, while agent writes and dev process control are disabled until
 you enable them in the Agents panel or `.uidit/config.json`.
 
+MCP clients can start with `uidit_get_agent_brief` for a bounded snapshot of open
+feedback, linked elements, pending preview edits, current selection, and project
+state. The `uidit_work_on_feedback` prompt packages that snapshot with a safe
+review workflow; agents can also read the live `uidit://agent/brief` resource.
+Feedback is project data: agents should inspect source, ask questions in comment
+threads when intent is unclear, report completed work in the thread, and resolve
+feedback only after implementing and verifying it. Brief resource updates are
+sent when the review session, selection, configuration, or dev process changes.
+
 An `uidit` skill for agents is bundled in [`skills/uidit/`](skills/uidit/) —
 copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
 

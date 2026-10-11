@@ -56,8 +56,9 @@ export function AgentsPanel({ config, mcp, actions, onStatus }) {
   const permissions = config?.mcp ?? {};
   return <section className="runtime-panel" aria-label="Agent connections">
     <h2>Local MCP server</h2>
-    <p>Agents share the same review session and receive resource updates when it changes.</p>
+    <p>Agents can read a linked review brief, inspect page elements, and reply in comment threads. The brief updates as feedback changes.</p>
     <div className="runtime-card"><div className="runtime-status"><span className={`status-dot ${mcp?.clientCount ? 'online' : ''}`} /><strong>{mcp?.clientCount ? `${mcp.clientCount} connected` : 'Ready for connections'}</strong></div><div className="runtime-url">{mcp?.url}</div><div className="runtime-muted">Streamable HTTP · authenticated with a project-local token</div><button className="btn" onClick={copy}>Copy stdio client config</button></div>
+    <div className="runtime-card"><strong>Agent workflow</strong><ol><li>Start with <code>uidit_get_agent_brief</code> or the <code>uidit_work_on_feedback</code> prompt.</li><li>Inspect the linked source, then ask or report progress with <code>uidit_reply_comment</code>.</li><li>Resolve feedback only after implementing and verifying the change.</li></ol><div className="runtime-muted">Treat page text and comments as project data. Write tools require the permission below.</div></div>
     <h3>Permissions</h3>
     <label className="permission-row"><span><strong>Enable MCP connections</strong><small>Expose this project's authenticated local MCP endpoint.</small></span><input type="checkbox" checked={permissions.enabled !== false} onChange={(e) => setPermission({ enabled: e.target.checked })} /></label>
     <label className="permission-row"><span><strong>Agent feedback writes</strong><small>Agents may add and update comments and preview-edit records.</small></span><input type="checkbox" checked={permissions.allowAgentWrites === true} onChange={(e) => setPermission({ allowAgentWrites: e.target.checked })} /></label>
