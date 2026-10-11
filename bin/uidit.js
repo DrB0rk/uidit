@@ -11,6 +11,8 @@ import { resolveDevCommand } from '../src/server/command-resolver.js';
 import { createProcessManager } from '../src/server/process-manager.js';
 import { startMcpServer, readMcpToken, runStdioBridge } from '../src/server/mcp/server.js';
 import { acquireProjectLock } from '../src/server/runtime-lock.js';
+import { createHub } from '../src/server/realtime.js';
+import { CollaborationManager } from '../src/server/collaboration.js';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(PKG_ROOT, 'dashboard', 'dist');
@@ -71,21 +73,22 @@ const commands = {
       console.log(`${c.dim('building dashboard…')}`);
       await buildDashboard();
     }
-    let hub = null;
+    let hub = createHub({ cwd });
+    const collaborationManager = new CollaborationManager({ cwd, hub });
     const processManager = createProcessManager({ cwd, onChange: (status) => {
       hub?.notifyDev(status);
       if (status.url && status.url !== store.readConfig(cwd)?.targetUrl) { store.writeConfig(cwd, { targetUrl: status.url, dev: { url: status.url } }); hub?.notifyConfig(); }
     } });
-    const preview = await startServer({ cwd, port: configuredPreviewPort, controlPort: port, previewOnly: true });
-    hub = preview.hub;
+    const preview = await startServer({ cwd, port: configuredPreviewPort, controlPort: port, previewOnly: true, hub, collaborationManager });
     let mcp;
-    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, hub }); }
-    catch (err) { hub.close(); preview.server.close(); throw err; }
+    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, hub, collaborationManager }); }
+    catch (err) { collaborationManager.close(); hub.close(); preview.server.close(); throw err; }
     let stopping = false;
     const bye = async () => {
       if (stopping) return;
       stopping = true;
       await processManager.stop();
+      collaborationManager.close();
       hub.close(); await mcp.close(); preview.server.close();
       runtimeLock.release();
       console.log(`\n  ${c.dim('uidit stopped. Your feedback is saved in .uidit/')}`);

@@ -2,21 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './Toolbar.jsx';
 import Sidebar from './Sidebar.jsx';
 import { AgentsPanel, ServerPanel, SettingsPanel } from './RuntimePanels.jsx';
+import { DesignPanel } from './DesignPanel.jsx';
 import { useSession } from '../state/useSession.js';
-import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon } from 'lucide-react';
+import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles, Ellipsis } from 'lucide-react';
+import { FlowsPanel } from './RuntimePanels.jsx';
 
-const TABS = [['feedback', 'Feedback', MessageSquareText], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
+const TABS = [['feedback', 'Feedback', MessageSquareText], ['design', 'Design', WandSparkles], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['flows', 'Flows', Workflow], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
+const PRIMARY_TABS = TABS.slice(0, 4);
+const MORE_TABS = TABS.slice(4);
 const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
 
 export default function Dashboard() {
-  const { config, session, status: live, dev, mcp, selection, actions } = useSession();
+  const { config, session, status: live, dev, mcp, collaboration, selection, actions } = useSession();
   const frameRef = useRef(null);
+  const replayWaiters = useRef(new Map());
   const [mode, setMode] = useState('off');
   const [selected, setSelected] = useState(null);
   const [status, setStatus] = useState({ text: 'ready', kind: '' });
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [tab, setTab] = useState('feedback');
   const [reloadKey, setReloadKey] = useState(0);
+  const [replayState, setReplayState] = useState(null);
+  const [device, setDevice] = useState(() => { try { return ['desktop', 'tablet', 'phone'].includes(localStorage.getItem('uidit-device')) ? localStorage.getItem('uidit-device') : 'desktop'; } catch { return 'desktop'; } });
+  const [reference, setReference] = useState(null);
+  const [compareMode, setCompareMode] = useState('overlay');
+  const [referenceOpacity, setReferenceOpacity] = useState(50);
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('uidit-theme') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
   });
@@ -25,6 +35,8 @@ export default function Dashboard() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem('uidit-theme', theme); } catch {}
   }, [theme]);
+
+  useEffect(() => { try { localStorage.setItem('uidit-device', device); } catch {} }, [device]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -93,6 +105,19 @@ export default function Dashboard() {
       if (ev.source !== frameRef.current?.contentWindow || ev.origin !== previewOrigin) return;
       const msg = ev.data;
       if (!msg || msg.source !== 'uidit-overlay') return;
+      if (msg.type === 'record-step' && msg.step && typeof msg.flowId === 'string') {
+        actions.addFlowStep(msg.flowId, msg.step).catch((error) => onStatus(error.message, 'error'));
+        return;
+      }
+      if (msg.type === 'record-log' && typeof msg.flowId === 'string') {
+        actions.addFlowLog(msg.flowId, { kind: msg.kind, message: msg.message, url: msg.url }).catch((error) => onStatus(error.message, 'error'));
+        return;
+      }
+      if (msg.type === 'replay-result' && typeof msg.id === 'string') {
+        replayWaiters.current.get(msg.id)?.(msg);
+        replayWaiters.current.delete(msg.id);
+        return;
+      }
       if (msg.type === 'api-request') {
         if (typeof msg.id !== 'string' || msg.id.length > 100) return;
         try {
@@ -111,6 +136,11 @@ export default function Dashboard() {
       if (msg.type === 'control') {
         if (msg.action === 'inspect' && typeof msg.enabled === 'boolean') { setMode(msg.enabled ? 'inspect' : 'off'); toOverlay({ type: 'mode', mode: msg.enabled ? 'inspect' : 'off' }); }
         if (msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) toOverlay({ type: 'drawMode', tool: msg.tool });
+        if (msg.action === 'applyDesignVariant' && Array.isArray(msg.styles) && msg.styles.length <= 8) {
+          const allowed = new Set(['border-radius', 'box-shadow', 'padding', 'background-color', 'color', 'font-weight', 'font-size', 'gap']);
+          const styles = msg.styles.map((item) => Array.isArray(item) ? { property: item[0], value: item[1] } : item).filter((item) => item && allowed.has(item.property) && typeof item.value === 'string' && item.value.length <= 120);
+          if (styles.length) { for (const style of styles) toOverlay({ type: 'style', property: style.property, value: style.value }); onStatus(`${String(msg.name ?? 'Design direction').slice(0, 50)} applied to the preview`, 'ok'); }
+        }
         if (msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim()) {
           try { await actions.comment({ text: msg.text.trim().slice(0, 4000), elementId: msg.elementId ?? null, page: typeof msg.page === 'string' ? msg.page.slice(0, 2000) : null }); onStatus('Comment saved to the shared review', 'ok'); }
           catch (error) { onStatus(error.message, 'error'); }
@@ -125,6 +155,32 @@ export default function Dashboard() {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [actions, bridgeApi, onStatus, previewOrigin, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
+
+  const recordingFlowId = session.flows?.find((flow) => flow.status === 'recording')?.id ?? null;
+  useEffect(() => {
+    toOverlay({ type: 'recordMode', enabled: Boolean(recordingFlowId), flowId: recordingFlowId });
+  }, [recordingFlowId, toOverlay, targetUrl]);
+
+  const replayFlow = useCallback(async (flow) => {
+    if (!targetUrl) { onStatus('Connect a preview before replaying a flow', 'error'); return; }
+    setReplayState({ flowId: flow.id, running: true, passed: 0, failed: 0, messages: [] });
+    let passed = 0; const messages = [];
+    for (const step of flow.steps) {
+      if (step.sensitive) { messages.push(`Skipped sensitive step: ${step.label || step.action}`); continue; }
+      const id = crypto.randomUUID();
+      const response = new Promise((resolve) => {
+        const timer = setTimeout(() => { replayWaiters.current.delete(id); resolve({ ok: false, error: 'Timed out waiting for the preview' }); }, 8000);
+        replayWaiters.current.set(id, (value) => { clearTimeout(timer); resolve(value); });
+      });
+      toOverlay({ type: 'replayStep', id, step });
+      const result = await response;
+      if (result.ok) passed += 1; else messages.push(`${step.label || step.action}: ${result.error}`);
+      setReplayState({ flowId: flow.id, running: true, passed, failed: messages.length, messages: [...messages] });
+      if (result.ok) await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    setReplayState({ flowId: flow.id, running: false, passed, failed: messages.length, messages });
+    onStatus(messages.length ? `Flow replay finished with ${messages.length} issue(s)` : `Flow replay passed ${passed} step(s)`, messages.length ? 'error' : 'ok');
+  }, [onStatus, targetUrl, toOverlay]);
 
   useEffect(() => {
     syncOverlay();
@@ -163,16 +219,27 @@ export default function Dashboard() {
   };
 
   return <main className={`immersive${workspaceOpen ? ' workspace-open' : ''}`}>
-    {targetUrl ? <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title="Live application preview" src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={syncOverlay} /> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
+    {targetUrl ? <>
+      <div className={`preview-device-stage device-${device}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100 }}>
+        <div className="preview-live-frame">
+          <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title={`${device} live application preview`} src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={syncOverlay} />
+          {reference && compareMode === 'overlay' && <img className="preview-reference-overlay" src={reference.dataUrl} alt="Reference design overlay" />}
+        </div>
+        {reference && compareMode === 'side' && <div className="preview-reference-side"><span>Reference</span><img src={reference.dataUrl} alt={`Reference: ${reference.name}`} /></div>}
+      </div>
+      {workspaceOpen && <div className="device-toolbar" role="group" aria-label="Preview device size">{[['desktop', 'Desktop', Laptop], ['tablet', 'Tablet', Tablet], ['phone', 'Phone', Smartphone]].map(([key, label, Icon]) => <button type="button" key={key} aria-pressed={device === key} className={device === key ? 'active' : ''} onClick={() => setDevice(key)}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}</div>}
+    </> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
     {workspaceOpen && <section className="workspace-drawer" aria-label="UIDIT review workspace">
-      <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
+      <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><details className="workspace-more"><summary className={MORE_TABS.some(([id]) => tab === id) ? 'active' : ''} aria-label="More workspace sections" title="More workspace sections"><Ellipsis size={17} aria-hidden="true"/><span>More</span></summary><div className="workspace-more-menu">{MORE_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={(event) => { setTab(id); event.currentTarget.closest('details').open = false; }}><Icon size={15} aria-hidden="true"/><span>{label}</span></button>)}</div></details><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
       {targetUrl && <Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
       <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
-      <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
+      <nav className="workspace-tabs" aria-label="Review workspace sections">{PRIMARY_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
-        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} tab={tab} showTabs={false} />}
+        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
+        {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
+        {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
         {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} />}
-        {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} actions={actions} onStatus={onStatus} />}
+        {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} actions={actions} onStatus={onStatus} />}
         {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
       </div>
       <footer className="workspace-foot"><span className="status-dot online" /> Local · {live}</footer>

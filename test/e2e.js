@@ -44,6 +44,38 @@ try {
   assert.ok(frame, `proxied preview frame did not load: ${JSON.stringify({ src: await page.locator('iframe.immersive-preview').getAttribute('src'), frames: page.frames().map((f) => f.url()) })}`);
   await frame.locator('#uidit-context-menu').waitFor({ state: 'attached', timeout: 10000 });
 
+  // A team review invite can be created from the feedback sidebar without
+  // leaving the page or visiting the Agents settings view.
+  const shareCard = page.getByRole('region', { name: 'Share team review' });
+  await shareCard.getByRole('button', { name: 'Create link' }).click();
+  assert.match(await shareCard.locator('input[type="url"]').inputValue(), /^https:\/\//);
+  await shareCard.getByPlaceholder('Paste ADMIN_SECRET').waitFor();
+  await shareCard.getByRole('button', { name: 'Close' }).click();
+
+  // Device presets change the actual browsing context, and reference matching
+  // supports both an overlay and a side-by-side comparison.
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  const devicePhone = page.getByRole('button', { name: 'Phone' });
+  await devicePhone.click();
+  await page.waitForTimeout(200);
+  const phoneViewport = await frame.evaluate(() => innerWidth);
+  assert.ok(phoneViewport >= 380 && phoneViewport <= 400, `phone preview width: ${phoneViewport}`);
+  const phoneHeight = await frame.evaluate(() => innerHeight);
+  assert.ok(phoneHeight >= 830 && phoneHeight <= 860, `phone preview height: ${phoneHeight}`);
+  await page.getByRole('button', { name: 'Tablet' }).click();
+  await page.waitForTimeout(200);
+  const tabletViewport = await frame.evaluate(() => innerWidth);
+  assert.ok(tabletViewport >= 760 && tabletViewport <= 768, `tablet preview width: ${tabletViewport}`);
+  const tabletHeight = await frame.evaluate(() => innerHeight);
+  assert.ok(tabletHeight >= 1000 && tabletHeight <= 1040, `tablet preview height: ${tabletHeight}`);
+  await page.getByRole('button', { name: 'Desktop' }).click();
+  const referencePng = await page.screenshot({ type: 'png' });
+  await page.locator('.reference-drop input').setInputFiles({ name: 'review-reference.png', mimeType: 'image/png', buffer: referencePng });
+  await page.locator('.reference-card img').waitFor();
+  await page.locator('.reference-mode select').selectOption('side');
+  await page.locator('.preview-reference-side img').waitFor();
+  await page.getByRole('button', { name: 'Remove' }).click();
+
   // Floating control expands, exposes grouped actions, and toggles closed.
   const floating = page.frames().find((f) => f.url().includes('/floating?'));
   assert.ok(floating, 'floating control frame did not load');
@@ -52,7 +84,7 @@ try {
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
   await floating.waitForFunction(() => document.body.classList.contains('theme-light'));
   const lightSidebar = await page.locator('.workspace-drawer').evaluate((el) => getComputedStyle(el).backgroundColor);
-  const lightFrame = await page.locator('iframe.immersive-preview').evaluate((el) => getComputedStyle(el).borderTopColor);
+  const lightFrame = await page.locator('.preview-live-frame').evaluate((el) => getComputedStyle(el).outlineColor);
   await floating.waitForFunction(() => getComputedStyle(document.querySelector('.fab')).backgroundColor === 'rgb(255, 255, 255)');
   const lightButton = await floating.locator('.fab').evaluate((el) => getComputedStyle(el).backgroundColor);
   assert.equal(lightFrame, lightSidebar, 'preview frame should blend into the sidebar surface');
@@ -77,13 +109,22 @@ try {
   assert.ok(Math.abs(floatingAfter.x - floatingBefore.x) > 50, 'dragging should move the floating control iframe');
 
   // Inspection tags an element; comment and quick style edit persist.
+  await page.getByRole('button', { name: /Feedback/ }).click();
   await page.getByRole('button', { name: 'Inspect', exact: true }).click();
   await frame.locator('#pay').click();
   await page.waitForFunction(() => !!document.querySelector('#sel-selector')?.textContent.trim());
   assert.match(await page.locator('#sel-selector').innerText(), /pay|BUTTON/i);
   await page.locator('[data-testid="comment"]').fill('Make this button full width on mobile.');
+  await page.evaluate(async (base64) => {
+    const binary = atob(base64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const file = new File([bytes], 'pasted-reference.png', { type: 'image/png' });
+    const transfer = new DataTransfer(); transfer.items.add(file);
+    document.querySelector('[data-testid="comment"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+  }, referencePng.toString('base64'));
+  await page.locator('.comment-photo-thumb img').waitFor();
   await page.getByRole('button', { name: 'Comment', exact: true }).click();
   await page.getByText('Make this button full width on mobile.').waitFor();
+  await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((comment) => comment.text === 'Make this button full width on mobile.' && comment.attachments?.length === 1));
   await page.locator('details.tools summary').click();
   await page.locator('[data-testid="style-prop"]').fill('padding');
   await page.locator('[data-testid="style-val"]').fill('16px');
@@ -91,12 +132,21 @@ try {
   await frame.waitForFunction(() => getComputedStyle(document.querySelector('#pay')).padding === '16px');
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.edits.some((edit) => edit.property === 'padding' && edit.after === '16px'));
   assert.equal(await frame.locator('#pay').evaluate((el) => getComputedStyle(el).padding), '16px');
-
+  await page.getByRole('button', { name: 'Design', exact: true }).click();
+  await page.getByRole('button', { name: 'Compare all four on page' }).click();
+  const variantComparison = frame.locator('#uidit-variant-compare');
+  await variantComparison.waitFor();
+  assert.equal(await variantComparison.locator('article').count(), 4, 'comparison should show all four live directions');
+  await variantComparison.getByRole('button', { name: 'Apply Soft card' }).click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.style.borderRadius === '16px');
+  await page.getByRole('button', { name: 'Undo preview' }).click();
+  await frame.waitForFunction(() => !document.querySelector('#pay')?.style.borderRadius);
   // Context menu comment attaches to the right-clicked heading.
   await frame.locator('h1').click({ button: 'right' });
   await frame.locator('[data-context-action="comment"]').click();
   await frame.locator('#uidit-context-note').fill('Give the heading more breathing room.');
   await frame.locator('[data-context-action="post"]').click();
+  await page.getByRole('button', { name: /Feedback/ }).click();
   await page.getByText('Give the heading more breathing room.').waitFor();
   assert.equal(await frame.locator('#uidit-context-menu').isHidden(), true);
   await frame.locator('.uidit-comment-marker').nth(1).waitFor();
@@ -133,10 +183,21 @@ try {
   const prompt = await client.getPrompt({ name: 'uidit_work_on_feedback', arguments: { focus: 'breathing room' } });
   assert.match(prompt.messages[0].content.text, /uidit_reply_comment/);
   assert.match(prompt.messages[0].content.text, /breathing room/);
+  const codeLink = await client.callTool({ name: 'uidit_link_code', arguments: { commentId: headingComment.id, file: 'src/components/Checkout.tsx', startLine: 18, endLine: 24 } });
+  assert.equal(Boolean(codeLink.isError), false, JSON.stringify(codeLink));
+  const latestRevision = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).revision;
+  const statusUpdate = await client.callTool({ name: 'uidit_update_comment', arguments: { id: headingComment.id, status: 'in_progress', expectedRevision: latestRevision } });
+  assert.equal(Boolean(statusUpdate.isError), false, JSON.stringify(statusUpdate));
+  const triage = await client.callTool({ name: 'uidit_triage_feedback', arguments: {} });
+  assert.equal(Boolean(triage.isError), false, JSON.stringify(triage));
+  assert.ok(triage.structuredContent.suggestedOrder.some((item) => item.id === headingComment.id));
   await client.close();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.replies?.some((r) => r.author === 'agent')));
   const commentCard = page.locator('.item').filter({ hasText: 'Give the heading more breathing room.' });
   await commentCard.getByText('I can adjust it. Is 24px appropriate?').waitFor();
+  await commentCard.getByText('src/components/Checkout.tsx:18–24').waitFor();
+  await commentCard.getByRole('combobox', { name: 'Feedback status' }).selectOption('needs_info');
+  await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.text === 'Give the heading more breathing room.' && c.status === 'needs_info'));
   await commentCard.getByRole('button', { name: 'Reply', exact: true }).click();
   await commentCard.getByRole('textbox', { name: 'Reply to comment' }).fill('Yes, please match the card spacing.');
   await commentCard.getByRole('button', { name: 'Send reply' }).click();
@@ -163,9 +224,38 @@ try {
   await page.mouse.up();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.drawing?.type === 'arrow'));
 
+  // Record a real preview action with a screenshot, stop, then replay it.
+  const moreMenu = page.locator('.workspace-head-actions .workspace-more');
+  await moreMenu.locator('summary').click();
+  await moreMenu.getByRole('button', { name: /^Flows/ }).click();
+  await page.locator('#uidit-flow-name').fill('Checkout button smoke flow');
+  await page.getByRole('button', { name: 'Start recording' }).click();
+  await page.waitForTimeout(150);
+  // Dispatch on the page body so an existing visual comment marker does not
+  // intercept the browser pointer before the recording handler sees it.
+  await frame.locator('.card p').first().evaluate((element) => element.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 })));
+  await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.flows?.some((flow) => flow.steps.length > 0));
+  await page.getByRole('button', { name: 'Stop and save' }).click();
+  await page.getByRole('button', { name: 'Replay flow' }).click();
+  await page.locator('.flow-result').waitFor({ timeout: 10000 });
+  assert.equal((await page.locator('.flow-result').innerText()).split('\n')[0], 'Passed 1 step(s)', await page.locator('.flow-result').innerText());
+  const recordedFlow = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).flows[0];
+  assert.equal(recordedFlow.status, 'recorded');
+  assert.equal(recordedFlow.steps[0].type, 'click');
+  assert.ok(recordedFlow.steps[0].screenshotUrl, 'recorded step should include a page screenshot');
+  const flowScreenshot = await fetch(`http://127.0.0.1:${DASH}${recordedFlow.steps[0].screenshotUrl}`);
+  assert.equal(flowScreenshot.status, 200);
+  assert.match(flowScreenshot.headers.get('content-type'), /image\/jpeg/);
+  assert.ok((await flowScreenshot.arrayBuffer()).byteLength > 1000);
+
   // Each workspace section opens, and settings can be saved.
-  for (const label of ['Elements', 'Changes', 'Server', 'Agents', 'Settings']) {
+  for (const label of ['Elements', 'Changes']) {
     await page.locator('.workspace-tabs').getByRole('button', { name: new RegExp(`^${label}`) }).click();
+    await page.locator('.workspace-content').waitFor();
+  }
+  for (const label of ['Server', 'Agents', 'Settings']) {
+    await moreMenu.locator('summary').click();
+    await moreMenu.getByRole('button', { name: new RegExp(`^${label}`) }).click();
     await page.locator('.workspace-content').waitFor();
   }
   await page.locator('#uidit-position').selectOption('bottom-right');
@@ -173,7 +263,10 @@ try {
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();
 
   const state = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8'));
-  assert.equal(state.elements.length, 2);
+  assert.ok(state.elements.length >= 2);
+  const headingElement = state.elements.find((element) => /h1/.test(element.selector));
+  assert.ok(headingElement?.accessibleName);
+  assert.ok(headingElement?.nearbyText);
   assert.equal(state.comments.length, 4);
   assert.equal(state.comments.filter((c) => c.elementId).length, 2);
   assert.equal(state.comments.filter((c) => !c.elementId && !c.drawing).length, 1);
@@ -181,8 +274,10 @@ try {
   const pageNote = state.comments.find((c) => c.text === 'The page should explain delivery timing.');
   assert.ok(pageNote.anchor && pageNote.anchor.x > 0.6 && pageNote.anchor.y > 0.6, 'right-click page note keeps its page location');
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.replies.length, 3);
+  assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.status, 'needs_info');
+  assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.codeRefs[0]?.file, 'src/components/Checkout.tsx');
   assert.equal(await frame.locator('.uidit-comment-marker').count(), 3);
-  assert.equal(state.edits.filter((e) => e.kind === 'style').length, 1);
+  assert.equal(state.edits.filter((e) => e.kind === 'style').length, 4, 'custom style edit and variant properties are recorded');
   assert.equal(state.elements.find((e) => e.selector.includes('pay'))?.page, `http://127.0.0.1:${FIXTURE_PORT}/`);
   assert.deepEqual(errors, [], 'browser page errors');
 
@@ -194,9 +289,10 @@ try {
   await resolvedCard.getByRole('button', { name: 'Reopen comment' }).click();
   await resolvedCard.locator('.tag').filter({ hasText: 'Open' }).waitFor();
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Changes/ }).click();
+  const spacingEdit = page.locator('.item').filter({ has: page.locator('.item-selector', { hasText: 'padding' }) }).filter({ hasText: '16px' }).first();
   page.once('dialog', (dialog) => dialog.accept('Applied the spacing to the source CSS and verified it.'));
-  await page.locator('.item').filter({ hasText: '16px' }).getByRole('button', { name: 'Mark as applied in source' }).click();
-  await page.locator('.item').filter({ hasText: '16px' }).getByText('applied in source').waitFor();
+  await spacingEdit.getByRole('button', { name: 'Mark as applied in source' }).click();
+  await spacingEdit.getByText('applied in source').waitFor();
   await page.screenshot({ path: '/tmp/uidit-e2e.png' });
   await page.reload();
   await page.locator('.workspace-drawer').waitFor();

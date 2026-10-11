@@ -25,12 +25,14 @@ export function useSession() {
   const [dev, setDev] = useState({ state: 'idle', logs: [] });
   const [mcp, setMcp] = useState({ clientCount: 0 });
   const [selection, setSelection] = useState(null);
+  const [collaboration, setCollaboration] = useState({ enabled: false, connected: false, participants: [] });
   const sourceRef = useRef(null);
 
   const refresh = useCallback(async () => {
     const data = await req('/api/state');
     setConfig(data.config);
     setSession(data.session);
+    setCollaboration(data.collaboration ?? { enabled: false, connected: false, participants: [] });
     return data;
   }, []);
 
@@ -57,6 +59,7 @@ export function useSession() {
     source.addEventListener('dev', (ev) => { if (!closed) setDev(JSON.parse(ev.data)); });
     source.addEventListener('mcp', (ev) => { if (!closed) setMcp(JSON.parse(ev.data)); });
     source.addEventListener('selection', (ev) => { if (!closed) setSelection(JSON.parse(ev.data)); });
+    source.addEventListener('collaboration', (ev) => { if (!closed) setCollaboration(JSON.parse(ev.data)); });
     source.onerror = () => {
       if (!closed) {
         setLive(false);
@@ -69,6 +72,7 @@ export function useSession() {
     };
   }, [refresh]);
 
+  const withSession = (request) => request.then((data) => { if (data.session) setSession(data.session); return data; });
   const actions = {
     setTargetUrl: (targetUrl) => req('/api/config', 'POST', { targetUrl }).then((d) => setConfig(d.config)),
     setConfig: (patch) => req('/api/config', 'POST', patch).then((d) => setConfig(d.config)),
@@ -90,7 +94,12 @@ export function useSession() {
     },
     mcp: () => req('/api/mcp'),
     selectElement: (selection) => req('/api/selection', 'POST', selection),
+    createCollaborationRoom: (body) => req('/api/collaboration/room', 'POST', body),
+    createFlow: (name) => withSession(req('/api/flows', 'POST', { name })),
+    addFlowStep: (flowId, step) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/steps`, 'POST', step)),
+    addFlowLog: (flowId, log) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/logs`, 'POST', log)),
+    updateFlow: (flowId, patch) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}`, 'PATCH', patch)),
   };
 
-  return { config, session, status, live, dev, mcp, selection, refresh, actions };
+  return { config, session, status, live, dev, mcp, collaboration, selection, refresh, actions };
 }

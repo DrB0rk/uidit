@@ -1,12 +1,73 @@
 import { useId, useState } from 'react';
 import {
-  Check, X, Copy, MousePointerClick, Trash2, RotateCcw, ClipboardCopy, Square,
+  Check, X, Copy, MousePointerClick, Trash2, RotateCcw, ClipboardCopy, Square, Users, Link2, ImagePlus,
 } from 'lucide-react';
+import { triageFeedback } from '../../../src/server/triage.js';
+import { readImageFiles } from '../lib/image-files.js';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+const DEFAULT_RELAY = 'https://uidit-collaboration-relay.berk-04d.workers.dev';
 
-function SelectionBox({ selected, onComment, onOverlay, busy }) {
+function PhotoAttachments({ attachments, onChange, onStatus }) {
+  const [busy, setBusy] = useState(false);
+  const add = async (files) => {
+    const remaining = Math.max(0, 2 - attachments.length);
+    if (!remaining) { onStatus('A comment can include up to 2 photos', 'error'); return; }
+    setBusy(true);
+    try {
+      const next = await readImageFiles([...files].slice(0, remaining));
+      onChange([...attachments, ...next]);
+    } catch (error) { onStatus(error.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  return <div className="comment-photo-picker" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); add(event.dataTransfer.files); }}>
+    <label className="photo-pick-button"><ImagePlus size={14} aria-hidden="true"/><span>{busy ? 'Preparing…' : 'Add photo'}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { add(event.target.files); event.target.value = ''; }} /></label>
+    <span className="photo-hint">or paste / drop · up to 2</span>
+    {attachments.map((image, index) => <span className="comment-photo-thumb" key={`${image.name}:${index}`}><img src={image.dataUrl} alt={`Attached reference ${index + 1}`} /><button type="button" aria-label={`Remove ${image.name}`} onClick={() => onChange(attachments.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}
+  </div>;
+}
+
+async function pasteCommentImages(event, attachments, setAttachments, onStatus) {
+  const files = [...(event.clipboardData?.items ?? [])].map((item) => item.getAsFile?.()).filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  const remaining = Math.max(0, 2 - attachments.length);
+  if (!remaining) { onStatus('A comment can include up to 2 photos', 'error'); return; }
+  try { setAttachments([...attachments, ...(await readImageFiles(files.slice(0, remaining)))]); }
+  catch (error) { onStatus(error.message, 'error'); }
+}
+
+function ShareReview({ collaboration, actions, onStatus, busy, setBusy }) {
+  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
+  const [adminSecret, setAdminSecret] = useState('');
+  const [showSetup, setShowSetup] = useState(false);
+  const create = async (event) => {
+    event.preventDefault();
+    try {
+      setBusy(true);
+      await actions.createCollaborationRoom({ relayUrl, adminSecret });
+      setAdminSecret('');
+      setShowSetup(false);
+      onStatus('Share link created', 'ok');
+    } catch (error) { onStatus(error.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(collaboration.inviteUrl); onStatus('Share link copied', 'ok'); }
+    catch { onStatus('Clipboard blocked by the browser', 'error'); }
+  };
+  return <section className="share-review" aria-label="Share team review">
+    <div className="share-review-top"><span className="share-review-icon"><Users size={15} aria-hidden="true" /></span><div><strong>Team review</strong><small>{collaboration?.enabled ? `${collaboration.participants?.length ?? 0} online · ${collaboration.connected ? 'Live' : 'Reconnecting'}` : 'Invite someone to review this page'}</small></div>
+      {collaboration?.inviteUrl ? <button type="button" className="btn primary sm" onClick={copy}><Copy size={13} />Copy link</button> : <button type="button" className="btn sm" onClick={() => setShowSetup((value) => !value)}><Link2 size={13} />{showSetup ? 'Close' : 'Create link'}</button>}
+    </div>
+    {collaboration?.inviteUrl && <div className="share-review-link"><input aria-label="Team review share link" readOnly value={collaboration.inviteUrl} onFocus={(event) => event.target.select()} /><span>{collaboration.error || collaboration.project}</span></div>}
+    {showSetup && !collaboration?.inviteUrl && <form className="share-review-form" onSubmit={create}><label>Cloudflare relay URL<input type="url" value={relayUrl} onChange={(event) => setRelayUrl(event.target.value)} required /></label><label>Relay admin secret<input type="password" value={adminSecret} onChange={(event) => setAdminSecret(event.target.value)} minLength={24} autoComplete="off" placeholder="Paste ADMIN_SECRET" required /></label><small>UIDIT sends the secret over HTTPS to create this room. It is not saved.</small><button type="submit" className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create share link'}</button></form>}
+  </section>;
+}
+
+function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
   const [text, setText] = useState('');
+  const [attachments, setAttachments] = useState([]);
   const [prop, setProp] = useState('padding');
   const [val, setVal] = useState('16px');
   const [cls, setCls] = useState('');
@@ -19,8 +80,9 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
       <section className="selection selection-empty" aria-label="Add page feedback">
         <div className="selection-intro"><strong>Leave page feedback</strong><span>Select an element to attach a note, or add a general page note.</span></div>
         <label className="sr-only" htmlFor={`${id}-comment`}>Add a note about this page</label>
-        <textarea id={`${id}-comment`} data-testid="comment" className="comment" rows={2} value={text} placeholder="What should change on this page?" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) { e.preventDefault(); onComment(text.trim()).then(() => setText('')); } }} />
-        <div className="row selection-actions"><span className="muted hint">Page-level note</span><button type="button" className="btn primary sm" disabled={!text.trim() || busy} onClick={async () => { await onComment(text.trim()); setText(''); }}>Add note</button></div>
+        <textarea id={`${id}-comment`} data-testid="comment" className="comment" rows={2} value={text} placeholder="What should change on this page?" onChange={(e) => setText(e.target.value)} onPaste={(event) => pasteCommentImages(event, attachments, setAttachments, onStatus)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && (text.trim() || attachments.length)) { e.preventDefault(); onComment(text.trim() || 'See attached reference photo.', attachments).then(() => { setText(''); setAttachments([]); }); } }} />
+        <PhotoAttachments attachments={attachments} onChange={setAttachments} onStatus={onStatus} />
+        <div className="row selection-actions"><span className="muted hint">Page-level note</span><button type="button" className="btn primary sm" disabled={(!text.trim() && !attachments.length) || busy} onClick={async () => { await onComment(text.trim() || 'See attached reference photo.', attachments); setText(''); setAttachments([]); }}>Add note</button></div>
       </section>
     );
   }
@@ -51,22 +113,25 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
         value={text}
         placeholder="What should change here?"
         onChange={(e) => setText(e.target.value)}
+        onPaste={(event) => pasteCommentImages(event, attachments, setAttachments, onStatus)}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && (text.trim() || attachments.length)) {
             e.preventDefault();
-            onComment(text.trim()).then(() => setText(''));
+            onComment(text.trim() || 'See attached reference photo.', attachments).then(() => { setText(''); setAttachments([]); });
           }
         }}
       />
+      <PhotoAttachments attachments={attachments} onChange={setAttachments} onStatus={onStatus} />
       <div className="row">
         <button
           type="button"
           id="comment-send"
           className="btn primary sm"
-          disabled={!text.trim() || busy}
+          disabled={(!text.trim() && !attachments.length) || busy}
           onClick={async () => {
-            await onComment(text.trim());
+            await onComment(text.trim() || 'See attached reference photo.', attachments);
             setText('');
+            setAttachments([]);
           }}
         >
           Comment
@@ -192,18 +257,19 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
   );
 }
 
-function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect }) {
+function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect, onCodeRef, onStatus, onAssign, collaborators = [] }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(comment.text);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [codeFile, setCodeFile] = useState('');
+  const [codeStart, setCodeStart] = useState('');
+  const [codeEnd, setCodeEnd] = useState('');
   return (
     <li className={`item${comment.resolved ? ' resolved' : ''}`}>
       <div className="item-top">
-        <span className={`tag${comment.resolved ? ' done' : ''}`}>
-          {comment.resolved ? <Check size={11} aria-hidden="true" /> : null}
-          {comment.resolved ? 'Resolved' : 'Open'}
-        </span>
+        {comment.resolved ? <span className="tag done"><Check size={11} aria-hidden="true" />Resolved</span> : <label className="tag comment-status"><span className="sr-only">Feedback status</span><select aria-label="Feedback status" value={comment.status ?? 'open'} onChange={(event) => onStatus(comment, event.target.value)}><option value="open">Open</option><option value="in_progress">In progress</option><option value="needs_info">Needs info</option></select></label>}
         <button type="button" className="item-selector" onClick={() => element && onSelect(element.id)}>
           {element?.selector ?? 'page-level note'}
         </button>
@@ -218,16 +284,31 @@ function CommentItem({ comment, element, onToggle, onUpdate, onReply, onSelect }
         </span>
       </div>
       {editing ? <div className="edit-comment"><textarea aria-label="Edit comment" value={text} onChange={(ev) => setText(ev.target.value)} /><button className="btn sm primary" disabled={!text.trim()} onClick={async () => { await onUpdate(comment, text.trim()); setEditing(false); }}>Save note</button></div> : <div className="item-text">{comment.text}</div>}
-      {(comment.replies ?? []).map((reply) => <div className="comment-reply" key={reply.id}><strong>{reply.author === 'agent' ? 'Agent' : 'You'}</strong><span>{reply.text}</span></div>)}
-      <div className="reply-tools"><button type="button" className="btn sm ghost" onClick={() => setReplyOpen((open) => !open)}>{replyOpen ? 'Cancel reply' : 'Reply'}</button></div>
+      {comment.attachments?.length > 0 && <div className="comment-attachments" aria-label="Comment reference photos">{comment.attachments.map((image, index) => <a key={`${image.name}:${index}`} href={image.dataUrl} target="_blank" rel="noreferrer" title={image.name}><img src={image.dataUrl} alt={image.name || `Comment reference ${index + 1}`} loading="lazy" /><span>{image.name || `Reference ${index + 1}`}</span></a>)}</div>}
+      {(comment.replies ?? []).map((reply) => <div className="comment-reply" key={reply.id}><strong>{reply.displayName || (reply.author === 'agent' ? 'Agent' : 'You')}</strong><span>{reply.text}</span></div>)}
+      {(comment.codeRefs ?? []).map((reference, index) => <div className="code-reference" key={`${reference.file}:${reference.startLine}:${index}`}><span>Code</span><code>{reference.file}:{reference.startLine}{reference.endLine !== reference.startLine ? `–${reference.endLine}` : ''}</code></div>)}
+      {collaborators.length > 0 && <label className="assignee-picker">Assigned to <select aria-label="Assign feedback" value={comment.assignee ?? ''} onChange={(event) => onAssign(comment, event.target.value || null)}><option value="">Unassigned</option>{comment.assignee && !collaborators.some((person) => person.name === comment.assignee) && <option value={comment.assignee}>{comment.assignee}</option>}{collaborators.map((person) => <option key={person.memberId} value={person.name}>{person.name}</option>)}</select></label>}
+      <div className="reply-tools"><button type="button" className="btn sm ghost" onClick={() => setReplyOpen((open) => !open)}>{replyOpen ? 'Cancel reply' : 'Reply'}</button><button type="button" className="btn sm ghost" onClick={() => setCodeOpen((open) => !open)}>{codeOpen ? 'Cancel link' : 'Link code'}</button></div>
       {replyOpen && <div className="edit-comment"><textarea aria-label="Reply to comment" value={replyText} onChange={(ev) => setReplyText(ev.target.value)} placeholder="Reply or ask the agent a question" /><button type="button" className="btn sm primary" disabled={!replyText.trim()} onClick={async () => { await onReply(comment, replyText.trim()); setReplyText(''); setReplyOpen(false); }}>Send reply</button></div>}
+      {codeOpen && <form className="code-reference-form" onSubmit={async (event) => { event.preventDefault(); await onCodeRef(comment, { file: codeFile, startLine: Number(codeStart), endLine: Number(codeEnd || codeStart) }); setCodeFile(''); setCodeStart(''); setCodeEnd(''); setCodeOpen(false); }}><input required maxLength={500} value={codeFile} onChange={(event) => setCodeFile(event.target.value)} placeholder="src/components/Card.tsx" aria-label="Project relative file path" /><input required type="number" min="1" value={codeStart} onChange={(event) => setCodeStart(event.target.value)} placeholder="Line" aria-label="Start line" /><input type="number" min={codeStart || 1} value={codeEnd} onChange={(event) => setCodeEnd(event.target.value)} placeholder="To" aria-label="End line" /><button className="btn sm primary" type="submit">Add link</button></form>}
       {comment.drawing && <div className="annotation-chip"><span aria-hidden="true">{comment.drawing.type === 'arrow' ? '↗' : comment.drawing.type === 'rectangle' ? '▱' : comment.drawing.type === 'ellipse' ? '◯' : '〰'}</span>{comment.drawing.type} annotation</div>}
       <div className="item-meta">
+        {comment.author && <span>{comment.author}</span>}
         <span>{fmt(comment.createdAt)}</span>
         {comment.page && <span>{comment.page.replace(/^https?:\/\//, '')}</span>}
       </div>
     </li>
   );
+}
+
+function FeedbackTriage({ comments, elements }) {
+  const triage = triageFeedback(comments, elements);
+  return <section className="feedback-triage" aria-label="Feedback triage suggestions">
+    <strong>Suggested order</strong><p>{triage.method}</p>
+    <ol>{triage.suggestedOrder.map((item) => <li key={item.id}><span className={`priority ${item.priority}`}>{item.priority}</span><span>{item.text}</span><small>{item.element?.selector ?? item.page ?? 'Page feedback'} · {item.status.replace('_', ' ')}</small></li>)}</ol>
+    {triage.relatedGroups.length > 0 && <div className="triage-groups"><strong>Related groups</strong>{triage.relatedGroups.map((group) => <p key={group.id}>{group.label} · {group.commentIds.length} notes</p>)}</div>}
+    {triage.possibleDuplicates.length > 0 && <div className="triage-groups"><strong>Possible duplicates</strong>{triage.possibleDuplicates.map(([left, right]) => <p key={`${left}:${right}`}>{triage.suggestedOrder.find((item) => item.id === left)?.text} ↔ {triage.suggestedOrder.find((item) => item.id === right)?.text}</p>)}</div>}
+  </section>;
 }
 
 function ElementItem({ element, selected, commentCount, onSelect, onDelete }) {
@@ -249,7 +330,9 @@ function ElementItem({ element, selected, commentCount, onSelect, onDelete }) {
           </button>
         </span>
       </div>
+      {element.accessibleName && <div className="element-context"><strong>{element.role ?? element.tag}</strong><span>{element.accessibleName}</span>{element.component && <small>{element.component.framework} · {element.component.name}</small>}</div>}
       {element.text && <div className="item-text muted">{element.text.slice(0, 140)}</div>}
+      {element.nearbyText && element.nearbyText !== element.text && <div className="element-nearby" title={element.nearbyText}>Nearby: {element.nearbyText.slice(0, 140)}</div>}
       <div className="item-meta">
         <span>{commentCount} comment{commentCount === 1 ? '' : 's'}</span>
         {element.ancestors?.length > 0 && <span>{element.ancestors.slice(-2).join(' ← ')}</span>}
@@ -300,7 +383,8 @@ export function toMarkdown(session) {
   lines.push(`${open.length} open comment(s), ${session.edits.length} pending edit(s).`, '');
   for (const c of session.comments) {
     const el = byElement.get(c.elementId);
-    lines.push(`- ${c.resolved ? '[x]' : '[ ]'} ${el ? `\`${el.selector}\`` : '_page level_'}: ${c.text}`);
+    lines.push(`- ${c.resolved ? '[x]' : '[ ]'} **${c.status ?? 'open'}** ${el ? `\`${el.selector}\`` : '_page level_'}: ${c.text}`);
+    for (const ref of c.codeRefs ?? []) lines.push(`  - Code: \`${ref.file}:${ref.startLine}${ref.endLine !== ref.startLine ? `-${ref.endLine}` : ''}\``);
   }
   if (session.edits.length) {
     lines.push('', '## Requested edits', '');
@@ -320,7 +404,7 @@ const TABS = [
   ['changes', 'Changes'],
 ];
 
-export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, page, tab: controlledTab, onTab, showTabs = true }) {
+export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus, page, collaboration, tab: controlledTab, onTab, showTabs = true }) {
   const [localTab, setLocalTab] = useState('feedback');
   const tab = controlledTab ?? localTab;
   const setTab = onTab ?? setLocalTab;
@@ -340,8 +424,8 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
     }
   };
 
-  const comment = run(async (text) => {
-    await actions.comment({ elementId: selectedId ?? null, text, page: selected?.page ?? page ?? null });
+  const comment = run(async (text, attachments = []) => {
+    await actions.comment({ elementId: selectedId ?? null, text, page: selected?.page ?? page ?? null, attachments });
   }, 'Comment saved to .uidit');
 
   const toggleComment = run((c) => actions.patch('comments', c.id, { resolved: !c.resolved }));
@@ -354,9 +438,13 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
   const drop = run((collection, id) => actions.remove(collection, id), 'Removed');
   const updateComment = run((comment, text) => actions.patch('comments', comment.id, { text }), 'Note updated');
   const replyComment = run((comment, text) => actions.reply(comment.id, { text, author: 'reviewer' }), 'Reply added');
+  const addCodeReference = run((comment, reference) => actions.patch('comments', comment.id, { codeRefs: [...(comment.codeRefs ?? []), reference] }), 'Code reference added');
+  const setCommentStatus = run((comment, status) => actions.patch('comments', comment.id, { status }), 'Feedback status updated');
+  const assignComment = run((comment, assignee) => actions.patch('comments', comment.id, { assignee }), 'Feedback assignment updated');
 
   const [filter, setFilter] = useState('open');
   const [query, setQuery] = useState('');
+  const [showTriage, setShowTriage] = useState(false);
 
   const openCount = session.comments.filter((c) => !c.resolved).length;
   const pendingEdits = session.edits.filter((e) => !e.applied).length;
@@ -397,8 +485,10 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       {tab === 'feedback' && (
         <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby={showTabs ? 'tab-feedback' : undefined}>
           <div className="panel-heading"><h2>Feedback</h2><span>{openCount} open</span></div>
-          <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} />
-          <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open · {openCount}</option><option value="all">All · {session.comments.length}</option><option value="resolved">Resolved · {session.comments.length - openCount}</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes, pages, selectors" aria-label="Search notes, pages, and selectors" /></div>
+          <ShareReview collaboration={collaboration} actions={actions} onStatus={onStatus} busy={busy} setBusy={setBusy} />
+          <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} onStatus={onStatus} />
+          <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open · {openCount}</option><option value="all">All · {session.comments.length}</option><option value="resolved">Resolved · {session.comments.length - openCount}</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes, pages, selectors" aria-label="Search notes, pages, and selectors" /><button type="button" className="btn sm ghost" onClick={() => setShowTriage((shown) => !shown)}>{showTriage ? 'Hide triage' : 'Triage'}</button></div>
+          {showTriage && <FeedbackTriage comments={session.comments} elements={session.elements} />}
           <ul className="list">
             {session.comments.length === 0 && (
               <li className="empty-state">
@@ -415,6 +505,10 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
                 onUpdate={updateComment}
                 onReply={replyComment}
                 onSelect={onSelect}
+                onCodeRef={addCodeReference}
+                onStatus={setCommentStatus}
+                onAssign={assignComment}
+                collaborators={collaboration?.participants ?? []}
               />
             ))}
           </ul>

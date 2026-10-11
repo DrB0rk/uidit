@@ -16,7 +16,7 @@ export function isInitialized(cwd = process.cwd()) {
   return fs.existsSync(path.join(uiditDir(cwd), 'config.json'));
 }
 
-const EMPTY = () => ({ version: 1, revision: 0, updatedAt: null, elements: [], comments: [], edits: [] });
+const EMPTY = () => ({ version: 1, revision: 0, updatedAt: null, elements: [], comments: [], edits: [], flows: [] });
 
 function writeAtomic(file, contents) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -76,7 +76,8 @@ export function readSession(cwd = process.cwd()) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     const session = { ...EMPTY(), ...parsed, revision: Number.isSafeInteger(parsed.revision) ? parsed.revision : 0 };
-    session.comments = Array.isArray(session.comments) ? session.comments.map((comment) => ({ ...comment, replies: Array.isArray(comment.replies) ? comment.replies : [] })) : [];
+    session.comments = Array.isArray(session.comments) ? session.comments.map((comment) => ({ ...comment, status: ['open', 'in_progress', 'needs_info'].includes(comment.status) ? comment.status : 'open', codeRefs: Array.isArray(comment.codeRefs) ? comment.codeRefs : [], replies: Array.isArray(comment.replies) ? comment.replies : [], attachments: Array.isArray(comment.attachments) ? comment.attachments : [] })) : [];
+    session.flows = Array.isArray(session.flows) ? session.flows : [];
     return session;
   } catch (error) {
     // Preserve corrupt user data. Returning an empty session here made the next
@@ -110,11 +111,23 @@ export function upsertElement(cwd, element) {
 
 export function addComment(cwd, comment) {
   const session = readSession(cwd);
+  const attachments = Array.isArray(comment.attachments) ? comment.attachments : [];
+  if (attachments.length > 2) throw new Error('a comment can include at most 2 images');
+  let attachmentBytes = 0;
+  for (const image of attachments) {
+    if (!image || image.mimeType !== 'image/jpeg' || typeof image.dataUrl !== 'string' || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(image.dataUrl) || image.dataUrl.length > 410_000) throw new Error('comment images must be compressed JPEGs under 300 KB');
+    attachmentBytes += image.dataUrl.length;
+    if (attachmentBytes > 820_000) throw new Error('comment images exceed the combined size limit');
+  }
   const record = {
     id: comment.id ?? stableId('cm', `${Date.now()}:${Math.random()}`),
     resolved: false,
+    status: 'open',
+    codeRefs: [],
     replies: [],
+    attachments: attachments.map(({ dataUrl, name, width, height }) => ({ dataUrl, name: typeof name === 'string' ? name.slice(0, 120) : 'reference.jpg', width: Number.isInteger(width) ? Math.max(1, Math.min(1600, width)) : null, height: Number.isInteger(height) ? Math.max(1, Math.min(1600, height)) : null, mimeType: 'image/jpeg' })),
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     ...comment,
   };
   session.comments.push(record);
@@ -122,15 +135,26 @@ export function addComment(cwd, comment) {
   return record;
 }
 
-export function addCommentReply(cwd, commentId, { text, author = 'reviewer', source } = {}) {
+export function normalizeCodeReference(reference) {
+  if (!reference || typeof reference !== 'object') throw new Error('code reference must be an object');
+  const file = typeof reference.file === 'string' ? reference.file.trim().replaceAll('\\', '/') : '';
+  const startLine = Number(reference.startLine);
+  const endLine = reference.endLine == null || reference.endLine === '' ? startLine : Number(reference.endLine);
+  if (!file || file.length > 500 || file.startsWith('/') || /^[a-z]:\//i.test(file) || file.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('code reference file must be a normalized project-relative path');
+  if (!Number.isSafeInteger(startLine) || startLine < 1 || !Number.isSafeInteger(endLine) || endLine < startLine || endLine - startLine > 5000) throw new Error('code reference lines must be valid positive line numbers');
+  return { file, startLine, endLine };
+}
+
+export function addCommentReply(cwd, commentId, { text, author = 'reviewer', source, displayName } = {}) {
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('reply text must be 1–4000 characters');
   if (!['reviewer', 'agent'].includes(author)) throw new Error('reply author must be reviewer or agent');
   const session = readSession(cwd);
   const comment = session.comments.find((item) => item.id === commentId);
   if (!comment) return null;
   comment.replies = Array.isArray(comment.replies) ? comment.replies : [];
-  const reply = { id: stableId('rp', `${commentId}:${Date.now()}:${Math.random()}`), text: text.trim(), author, source: source ?? author, createdAt: new Date().toISOString() };
+  const reply = { id: stableId('rp', `${commentId}:${Date.now()}:${Math.random()}`), text: text.trim(), author, source: source ?? author, ...(typeof displayName === 'string' ? { displayName: displayName.slice(0, 80) } : {}), createdAt: new Date().toISOString() };
   comment.replies.push(reply);
+  comment.updatedAt = reply.createdAt;
   writeSession(cwd, session);
   return { comment, reply };
 }
@@ -152,7 +176,7 @@ export function updateRecord(cwd, collection, id, patch) {
   const session = readSession(cwd);
   const idx = session[collection].findIndex((r) => r.id === id);
   if (idx < 0) return null;
-  session[collection][idx] = { ...session[collection][idx], ...patch };
+  session[collection][idx] = { ...session[collection][idx], ...patch, ...(collection === 'comments' && patch.updatedAt === undefined ? { updatedAt: new Date().toISOString() } : {}) };
   writeSession(cwd, session);
   return session[collection][idx];
 }
@@ -164,6 +188,22 @@ export function removeRecord(cwd, collection, id) {
   if (session[collection].length === before) return false;
   writeSession(cwd, session);
   return true;
+}
+
+export function mergeCollaborativeSession(cwd, remoteSession) {
+  if (!remoteSession || !Array.isArray(remoteSession.comments)) throw new Error('invalid collaborative session snapshot');
+  const session = readSession(cwd);
+  const merged = new Map(session.comments.map((comment) => [comment.id, comment]));
+  for (const remote of remoteSession.comments) {
+    if (!remote || typeof remote.id !== 'string' || typeof remote.text !== 'string') continue;
+    const local = merged.get(remote.id);
+    const stamp = (value) => Date.parse(value?.updatedAt ?? value?.replies?.at(-1)?.createdAt ?? value?.createdAt ?? '') || 0;
+    if (!local || stamp(remote) >= stamp(local)) merged.set(remote.id, remote);
+  }
+  const comments = [...merged.values()];
+  if (JSON.stringify(comments) === JSON.stringify(session.comments)) return session;
+  session.comments = comments;
+  return writeSession(cwd, session);
 }
 
 export const AGENT_README = `# .uidit
@@ -190,10 +230,13 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
       "selectorAlternatives": [".card", "div.card"], // fallbacks
       "tag": "DIV",
       "text": "Checkout",                          // trimmed, collapsed
+      "accessibleName": "Checkout summary",
+      "role": "region",
+      "nearbyText": "Order total Checkout summary $42",
+      "component": { "framework": "React", "name": "OrderSummary" }, // best effort
       "ancestors": ["body", "main#main"],          // tag#id chains for context
       "attributes": { "class": "card", "data-x": "" },
-      "page": "http://localhost:3000/cart",
-      "status": "open"                             // open | resolved
+      "page": "http://localhost:3000/cart"
     }
   ],
   "comments": [
@@ -202,6 +245,8 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
       "elementId": "el-a1b2c3d4",                   // null = page-level note
       "page": "http://localhost:3000/cart",
       "text": "This padding is inconsistent with the card below.",
+      "status": "open",                            // open | in_progress | needs_info
+      "codeRefs": [{ "file": "src/cart/Card.tsx", "startLine": 20, "endLine": 28 }],
       "anchor": { "x": 0.62, "y": 0.31 },           // normalized page point for page-level notes
       "replies": [{ "id": "rp-1234", "author": "agent", "text": "Should I match the next card's 16px padding?", "createdAt": "ISO-8601" }],
       "drawing": null,                            // optional arrow/rectangle/ellipse/freehand with normalized page points
@@ -230,7 +275,10 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
 
 1. Read \`session.json\`.
 2. Filter \`comments\` where \`resolved === false\`, ordered by \`createdAt\`.
-3. For each, locate the element via \`elements[].selector\` (fall back to
+   Use \`status\` for open, in-progress, or needs-info work. \`resolved\` remains
+   the completion flag. MCP triage groups and priority are heuristics; review original
+   feedback before acting.
+3. Inspect any \`codeRefs\` first, then locate the element via \`elements[].selector\` (fall back to
    \`selectorAlternatives\`); if the element cannot be found, report the comment against
    the nearest \`ancestors\` entry and say so explicitly. If a comment has a \`drawing\`,
    treat it as a visual instruction: \`type\` is \`arrow\`, \`rectangle\`, \`ellipse\`, or

@@ -24,7 +24,9 @@ in the project documents the schema — read it if anything is unclear.
 If this project exposes UIDIT MCP, begin with `uidit_get_agent_brief` or the
 `uidit_work_on_feedback` prompt. The brief links each open comment to its tagged
 element, includes pending preview edits and current selection, and can be filtered
-with `focus`. Read `uidit://agent/brief` for the same live-updating context.
+with `focus`. Read `uidit://agent/brief` for the same live-updating context, and
+use `uidit_triage_feedback` for suggested order, related groups, and possible
+duplicates. These are heuristics; check original feedback before acting.
 
 **Check `.uidit/` before you plan, not after.** A pending item there usually *is* the
 task the user actually wants, phrased in their words. If they said "make this form
@@ -37,8 +39,11 @@ that comment is the spec.
 | --- | --- |
 | `comments[].resolved === false` | Open work, ordered by `createdAt`. The work queue. |
 | `comments[].elementId` | Which tagged element it refers to; `null` means page-level. |
+| `comments[].codeRefs` | Project-relative source paths and line ranges linked to the thread. |
+| `comments[].status` | `open`, `in_progress`, or `needs_info`; `resolved` remains completion. |
 | `elements[].selector` | CSS selector to find it. `selectorAlternatives` are fallbacks. |
 | `elements[].ancestors` | Tag/id chain — your anchor when the selector no longer matches. |
+| `elements[].accessibleName` / `component` | Best-effort semantic and framework context to help locate source. |
 | `edits[]` | A change the user already tried in the browser and approved. Apply it in source. |
 | `edits[].before` / `.after` | Live values when they made the change — `before` is a sanity check. |
 | `edits[].applied` | `true` only after *you* committed the change to real source. |
@@ -48,14 +53,16 @@ the preview and kept it — that is pre-approved work, not a suggestion to evalu
 
 ## Applying the work
 
-1. Read open comments and pending edits before writing code.
+1. Read open comments and pending edits before writing code. Use `codeRefs` as
+   navigation hints; check triage suggestions against the original comments.
 2. For each, find the element by `selector`; if it no longer exists, say so explicitly
    and fall back to the nearest `ancestors` entry. Silently skipping feedback is the
    single most annoying failure mode here — the user can't tell the difference between
    "handled" and "ignored".
 3. Make the change in **source**, not as an inline style in the dashboard. The dashboard
    is a preview; the repo is the product.
-4. If MCP writes are enabled, reply in the comment thread with a question or concise
+4. If MCP writes are enabled, set status to `in_progress` while working and
+   `needs_info` when waiting on an answer. Reply in the thread with a question or concise
    completion summary using `uidit_reply_comment`. Mark preview edits applied only
    after source verification, and resolve comments only after the request is done.
    Without MCP, use the CLI/API workflow below.

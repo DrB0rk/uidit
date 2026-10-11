@@ -1,0 +1,16 @@
+name = "uidit-collaboration-relay"
+main = "src/index.js"
+compatibility_date = "2026-10-11"
+
+[[rules]]
+type = "Text"
+globs = ["public/index.html"]
+fallthrough = true
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "CollaborationRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CollaborationRoom"]

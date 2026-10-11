@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './store.js';
+import * as flowStore from './flow-store.js';
 import { discoverTargets } from './discover.js';
 import { createHub } from './realtime.js';
 
@@ -135,8 +136,11 @@ function extendPreviewCsp(headers, controlOrigin) {
     const directives = policy.split(';').map((part) => part.trim()).filter(Boolean);
     const index = (name) => directives.findIndex((d) => d.split(/\s+/, 1)[0].toLowerCase() === name);
     let scripts = index('script-src');
-    if (scripts < 0 && index('default-src') >= 0) directives.push("script-src 'self'");
-    else if (scripts >= 0 && !/(^|\s)'self'(?:\s|$)/i.test(directives[scripts])) directives[scripts] += " 'self'";
+    if (scripts < 0 && index('default-src') >= 0) directives.push(`script-src 'self' ${controlOrigin}`);
+    else if (scripts >= 0) {
+      if (!/(^|\s)'self'(?:\s|$)/i.test(directives[scripts])) directives[scripts] += " 'self'";
+      if (!directives[scripts].split(/\s+/).includes(controlOrigin)) directives[scripts] += ` ${controlOrigin}`;
+    }
     let styles = index('style-src');
     if (styles < 0 && index('default-src') >= 0) directives.push("style-src 'self'");
     else if (styles >= 0 && !/(^|\s)'self'(?:\s|$)/i.test(directives[styles])) directives[styles] += " 'self'";
@@ -215,7 +219,7 @@ async function proxyRequest(req, res, target, controlOrigin) {
   req.pipe(upstream);
 }
 
-export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718, previewOnly = false } = {}) {
+export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718, previewOnly = false, collaborationManager = null } = {}) {
   const controlOrigin = () => `http://127.0.0.1:${store.readConfig(cwd)?.controlPort ?? controlPort}`;
   const server = http.createServer(async (req, res) => {
     // A browser aborting a request (navigation, closed tab) must not take down the
@@ -251,10 +255,39 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
       // uidit owns a fixed set of API routes. Anything else under /api/ belongs to
       // the previewed app — real apps use /api/* too, so claiming the whole namespace
       // would break their data loading.
-      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|comments|edit)(?:\/|$)/;
+      const UIDIT_API = /^\/api\/(state|stream|discover|session\.json|config|element|comment|comments|edit|collaboration|flows)(?:\/|$)/;
       if (!previewOnly && UIDIT_API.test(route)) {
         if (route === '/api/state') {
-          return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd) });
+          return json(res, 200, { config: store.readConfig(cwd), session: store.readSession(cwd), collaboration: collaborationManager?.status() ?? { enabled: false } });
+        }
+        if (route === '/api/collaboration' && req.method === 'GET') return json(res, 200, collaborationManager?.status() ?? { enabled: false });
+        if (route === '/api/collaboration/room' && req.method === 'POST') {
+          if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
+          const body = await readBody(req);
+          const collaboration = await collaborationManager.createRoom({ relayUrl: body.relayUrl, adminSecret: body.adminSecret, project: path.basename(path.resolve(cwd)) });
+          return json(res, 201, { collaboration });
+        }
+        if (route === '/api/flows' && req.method === 'POST') {
+          const flow = flowStore.createFlow(cwd, await readBody(req)); hub.notify(); return json(res, 201, { flow, session: store.readSession(cwd) });
+        }
+        const screenshot = route.match(/^\/api\/flows\/([a-f0-9-]{36})\/steps\/([a-f0-9-]{36})\/screenshot$/i);
+        if (screenshot && req.method === 'GET') {
+          const asset = flowStore.readFlowScreenshot(cwd, screenshot[1], screenshot[2]);
+          if (!asset) return json(res, 404, { error: 'screenshot not found' });
+          res.writeHead(200, { 'content-type': asset.mime, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+          fs.createReadStream(asset.file).pipe(res); return;
+        }
+        const flowStep = route.match(/^\/api\/flows\/([a-f0-9-]{36})\/(steps|logs)$/i);
+        if (flowStep && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = flowStep[2] === 'steps' ? flowStore.addFlowStep(cwd, flowStep[1], body) : flowStore.addFlowLog(cwd, flowStep[1], body);
+          hub.notify(); return json(res, 201, { ...result, session: store.readSession(cwd) });
+        }
+        const flowMatch = route.match(/^\/api\/flows\/([a-f0-9-]{36})$/i);
+        if (flowMatch && req.method === 'PATCH') {
+          const flow = flowStore.updateFlow(cwd, flowMatch[1], await readBody(req));
+          if (!flow) return json(res, 404, { error: 'flow not found' });
+          hub.notify(); return json(res, 200, { flow, session: store.readSession(cwd) });
         }
         if (route === '/api/session.json') {
           return json(res, 200, store.readSession(cwd));
@@ -298,7 +331,14 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
 
         const patch = route.match(/^\/api\/(comments|edits|elements)\/([^/]+)$/);
         if (patch && req.method === 'PATCH') {
-          const record = store.updateRecord(cwd, patch[1], decodeURIComponent(patch[2]), await readBody(req));
+          const body = await readBody(req);
+          if (patch[1] === 'comments' && body.status !== undefined && !['open', 'in_progress', 'needs_info'].includes(body.status)) throw new Error('status must be open, in_progress, or needs_info');
+          if (patch[1] === 'comments' && body.assignee !== undefined && body.assignee !== null && (typeof body.assignee !== 'string' || body.assignee.length > 80)) throw new Error('assignee must be a participant name or null');
+          if (patch[1] === 'comments' && body.codeRefs !== undefined) {
+            if (!Array.isArray(body.codeRefs) || body.codeRefs.length > 50) throw new Error('codeRefs must contain at most 50 project-relative references');
+            body.codeRefs = body.codeRefs.map(store.normalizeCodeReference);
+          }
+          const record = store.updateRecord(cwd, patch[1], decodeURIComponent(patch[2]), body);
           if (!record) return json(res, 404, { error: 'not found' });
           hub.notify();
           return json(res, 200, { record, session: store.readSession(cwd) });
@@ -347,10 +387,10 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
   return server;
 }
 
-export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718, previewOnly = false } = {}) {
-  const hub = createHub({ cwd });
+export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718, previewOnly = false, hub: suppliedHub, collaborationManager = null } = {}) {
+  const hub = suppliedHub ?? createHub({ cwd });
   hub.watch();
-  const server = createServer({ cwd, hub, port, controlPort, previewOnly });
+  const server = createServer({ cwd, hub, port, controlPort, previewOnly, collaborationManager });
 
   // Hot reload runs over a websocket; without this the preview renders but never
   // refreshes when the user saves a file.

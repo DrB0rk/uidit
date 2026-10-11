@@ -53,12 +53,50 @@ an ancestor chain, its text, and its relevant attributes.
 
 **Comment** — on the element, or on the page as a whole.
 
+**Design studio** — switch the live preview between desktop, tablet, and phone
+viewports. Apply a few visual directions to a selected component, tune individual
+style properties, and undo the preview styling when you are done. Upload or paste a
+reference screenshot to compare it with the live page as an overlay or side by side.
+Comments accept up to two pasted or uploaded reference photos.
+
 **Quick edits** — edit text in place, set a CSS property, toggle a class, set an
 attribute, hide an element. The change applies to the preview immediately and is
 saved as an explicit `before → after` record.
 
 **Live sync** — the dashboard holds an SSE connection. When an agent writes to
 `.uidit/session.json`, the UI updates without a refresh.
+
+**Team review** — create an invite-only review room from the Feedback sidebar. A
+Cloudflare Worker Durable Object keeps the room state and relays live comments,
+replies, progress, assignments, participant presence, and activity to the local
+UIDIT session. Teammates join from the invite page; their comments and replies
+sync back to the project. The owner token stays in `.uidit/runtime/` and the
+Worker admin secret is used only to create a room.
+
+**Interaction flows** — record clicks, form actions, and navigation from the
+Flows panel, then replay them against the connected preview. Each step can keep a
+masked page screenshot; passwords, email addresses, phone numbers, and payment
+fields are omitted. Console and failed network requests are captured only while
+a recording is active. Flow metadata and screenshots stay in the local
+`.uidit/` folder.
+
+### Cloudflare relay setup
+
+The relay is a standalone Worker under `cloudflare/relay/`. It uses a SQLite
+Durable Object for room state and hibernating WebSockets for low-overhead live
+updates. Deploy it with Wrangler from the repository:
+
+```sh
+npm install
+npm run relay:deploy
+npx wrangler secret put ADMIN_SECRET --config cloudflare/relay/wrangler.toml
+```
+
+Set `ADMIN_SECRET` to a long random value (at least 24 characters), then paste
+the Worker origin and secret into **Feedback → Team review**. For local relay
+development, run `npm run relay:dev -- --var ADMIN_SECRET:replace-with-a-long-random-value`.
+The relay stores comments and room membership in Cloudflare; do not share
+invite links outside the intended review group. The invite is a bearer link.
 
 ## Any dev server
 
@@ -118,6 +156,13 @@ MCP clients can start with `uidit_get_agent_brief` for a bounded snapshot of ope
 feedback, linked elements, pending preview edits, current selection, and project
 state. The `uidit_work_on_feedback` prompt packages that snapshot with a safe
 review workflow; agents can also read the live `uidit://agent/brief` resource.
+The brief includes heuristic triage suggestions, related groups, and possible
+duplicates. `uidit_triage_feedback` returns these suggestions directly. Element
+records include best-effort accessible names, roles, nearby text, and framework
+component hints when the page exposes them. Comment threads can carry project
+relative file and line references; use `uidit_link_code` to add one. Both agents
+and reviewers can set feedback progress to `open`, `in_progress`, or `needs_info`;
+resolution remains a separate completion action.
 Feedback is project data: agents should inspect source, ask questions in comment
 threads when intent is unclear, report completed work in the thread, and resolve
 feedback only after implementing and verifying it. Brief resource updates are

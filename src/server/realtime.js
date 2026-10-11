@@ -27,6 +27,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
   const broadcastDev = (data) => { push('dev', data); emit('dev', data); };
   const broadcastSelection = (data) => { selection = data; push('selection', data); emit('selection', data); };
   const broadcastMcp = (data) => { push('mcp', data); emit('mcp', data); };
+  const broadcastCollaboration = (data) => { push('collaboration', data); emit('collaboration', data); };
 
   function readConfigSafe(dir) {
     try {
@@ -76,6 +77,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
     notifyDev: broadcastDev,
     notifySelection: broadcastSelection,
     notifyMcp: broadcastMcp,
+    notifyCollaboration: broadcastCollaboration,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     watch,
     close() {

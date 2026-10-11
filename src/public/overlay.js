@@ -15,6 +15,11 @@
   let drawingTool = 'off';
   let visualState = { comments: [], elements: [] };
   let drawStart = null;
+  let activeFlowId = null;
+  let inputTimer = null;
+  let restoreNetworkHooks = null;
+  let imageLibraryPromise = null;
+  let recordingCaptureQueue = Promise.resolve();
 
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
@@ -112,16 +117,129 @@
         attributes[attr.name] = attr.value;
       }
     }
+    const labelledBy = el.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => document.getElementById(id)?.textContent).filter(Boolean).join(' ');
+    const nativeLabel = el.labels ? [...el.labels].map((label) => label.textContent).join(' ') : '';
+    const accessibleName = collapse(el.getAttribute('aria-label') || labelledBy || nativeLabel || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || el.textContent).slice(0, 200);
+    let component = null;
+    try {
+      const reactKey = Object.keys(el).find((key) => key.startsWith('__reactFiber$'));
+      let fiber = reactKey ? el[reactKey] : null;
+      for (let depth = 0; fiber && depth < 12; depth += 1, fiber = fiber.return) {
+        const type = fiber.type;
+        const name = typeof type === 'function' ? type.displayName || type.name : typeof type === 'object' ? type?.displayName : '';
+        if (name && name !== 'Anonymous') { component = { framework: 'React', name: String(name).slice(0, 100) }; break; }
+      }
+      if (!component && el.__vueParentComponent) {
+        const type = el.__vueParentComponent.type;
+        const name = type?.name || type?.__name;
+        if (name) component = { framework: 'Vue', name: String(name).slice(0, 100) };
+      }
+      if (!component && window.ng?.getComponent) {
+        const instance = window.ng.getComponent(el);
+        const name = instance?.constructor?.name;
+        if (name && name !== 'Object') component = { framework: 'Angular', name: String(name).slice(0, 100) };
+      }
+      if (!component && el.__svelte_meta?.loc) component = { framework: 'Svelte', name: 'Svelte component' };
+    } catch { /* Framework introspection is best-effort and never affects inspection. */ }
     return {
       selector: uniqueSelector(el),
       selectorAlternatives: [...el.classList].map((c) => `.${CSS.escape(c)}`),
       tag: el.tagName,
       text: collapse(el.textContent).slice(0, 300),
+      accessibleName,
+      role: el.getAttribute('role') || ({ A: 'link', BUTTON: 'button', IMG: 'img', INPUT: el.type === 'checkbox' ? 'checkbox' : 'textbox', SELECT: 'combobox', TEXTAREA: 'textbox' }[el.tagName] ?? null),
+      nearbyText: collapse(el.parentElement?.innerText ?? '').slice(0, 240),
+      component,
       ancestors,
       attributes,
       page: realPage(),
     };
   };
+
+  const recordLog = (kind, message, url = location.href) => {
+    if (!activeFlowId) return;
+    const safe = String(message ?? '').slice(0, 1000).replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/([?&](?:token|key|secret|password)=)[^&\s]*/gi, '$1[redacted]');
+    post('record-log', { flowId: activeFlowId, kind, message: safe, url: String(url).slice(0, 2000) });
+  };
+  const isSensitive = (el) => el.matches('input[type="password"],input[type="email"],input[type="tel"],[autocomplete^="cc-"],[data-private]');
+  const loadImageLibrary = () => {
+    if (window.htmlToImage?.toJpeg) return Promise.resolve(window.htmlToImage.toJpeg);
+    if (!imageLibraryPromise) imageLibraryPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = `${controlOrigin}/html-to-image.js`; script.dataset.uiditUi = '1';
+      script.onload = () => window.htmlToImage?.toJpeg ? resolve(window.htmlToImage.toJpeg) : reject(new Error('Screenshot library did not load'));
+      script.onerror = () => reject(new Error('Screenshot library could not load'));
+      document.head.append(script);
+    });
+    return imageLibraryPromise;
+  };
+  const captureStepScreenshot = async () => {
+    const toJpeg = await loadImageLibrary();
+    const width = Math.max(320, Math.min(window.innerWidth || 1280, 1280));
+    const height = Math.max(240, Math.min(window.innerHeight || 900, 1000));
+    const mask = document.createElement('style');
+    mask.dataset.uiditUi = '1';
+    mask.textContent = 'input:not([type="checkbox"]):not([type="radio"]),textarea,select,[contenteditable="true"]{color:transparent!important;text-shadow:none!important;caret-color:transparent!important}';
+    document.head.append(mask);
+    try {
+      let image = await toJpeg(document.documentElement, { quality: 0.56, width, height, canvasWidth: Math.round(width * 0.72), canvasHeight: Math.round(height * 0.72), filter: (node) => !node?.hasAttribute?.('data-uidit-ui') });
+      if (image.length > 3_400_000) image = await toJpeg(document.documentElement, { quality: 0.32, width, height, canvasWidth: Math.round(width * 0.5), canvasHeight: Math.round(height * 0.5), filter: (node) => !node?.hasAttribute?.('data-uidit-ui') });
+      return image.length <= 3_400_000 ? image : null;
+    } finally { mask.remove(); }
+  };
+  const recordStep = (type, el, action = type) => {
+    if (!activeFlowId || !el || el.closest?.('[data-uidit-ui]')) return;
+    const record = describe(el);
+    const sensitive = type === 'input' && isSensitive(el);
+    const flowId = activeFlowId;
+    const step = { type, action, selector: uniqueSelector(el), label: record.accessibleName || record.text || record.role || record.tag, value: type === 'input' && !sensitive ? String(el.value ?? el.textContent ?? '').slice(0, 2000) : undefined, sensitive, page: realPage() };
+    recordingCaptureQueue = recordingCaptureQueue.then(async () => {
+      try { step.screenshot = await captureStepScreenshot(); } catch (error) { recordLog('page', `Screenshot unavailable: ${error.message}`); }
+      post('record-step', { flowId, step });
+    });
+  };
+  const setRecording = (enabled, flowId) => {
+    activeFlowId = enabled && typeof flowId === 'string' ? flowId : null;
+    clearTimeout(inputTimer);
+    if (!activeFlowId) { restoreNetworkHooks?.(); restoreNetworkHooks = null; return; }
+    if (restoreNetworkHooks) return;
+    const originalFetch = window.fetch;
+    const originalXhrSend = XMLHttpRequest.prototype.send;
+    const originalConsoleError = console.error;
+    window.fetch = function (...args) {
+      const requestUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+      return originalFetch.apply(this, args).then((response) => { if (!response.ok) recordLog('network', `HTTP ${response.status}`, requestUrl); return response; }, (error) => { recordLog('network', error?.message || 'Fetch failed', requestUrl); throw error; });
+    };
+    XMLHttpRequest.prototype.send = function (...args) {
+      this.addEventListener('loadend', () => { if (this.status >= 400 || this.status === 0) recordLog('network', `HTTP ${this.status || 'network error'}`, this.responseURL); }, { once: true });
+      return originalXhrSend.apply(this, args);
+    };
+    console.error = function (...args) { recordLog('console', args.map((value) => typeof value === 'string' ? value : (() => { try { return JSON.stringify(value); } catch { return String(value); } })()).join(' ')); return originalConsoleError.apply(this, args); };
+    const onError = (event) => recordLog('console', event.message || event.reason || 'Page error');
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onError);
+    restoreNetworkHooks = () => {
+      window.fetch = originalFetch; XMLHttpRequest.prototype.send = originalXhrSend; console.error = originalConsoleError;
+      window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onError);
+    };
+  };
+
+  document.addEventListener('click', (event) => {
+    if (!activeFlowId || event.button !== 0) return;
+    const el = event.target?.closest?.('button,a,input,select,textarea,[role="button"],[onclick]') ?? event.target?.closest?.('*');
+    if (el && !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) recordStep('click', el, 'click');
+  }, true);
+  document.addEventListener('input', (event) => {
+    const el = event.target;
+    if (!activeFlowId || !el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
+    clearTimeout(inputTimer); inputTimer = setTimeout(() => recordStep('input', el, 'fill'), 500);
+  }, true);
+  document.addEventListener('change', (event) => {
+    const el = event.target;
+    if (activeFlowId && el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) { clearTimeout(inputTimer); recordStep('input', el, el.type === 'checkbox' || el.type === 'radio' ? 'check' : 'fill'); }
+  }, true);
+  document.addEventListener('submit', (event) => { if (activeFlowId) recordStep('submit', event.target, 'submit'); }, true);
+  window.addEventListener('hashchange', () => { if (activeFlowId) post('record-step', { flowId: activeFlowId, step: { type: 'navigation', action: 'navigate', page: realPage(), label: document.title } }); });
 
   function installHighlightStyles() {
     if (document.getElementById('uidit-style')) return;
@@ -331,7 +449,7 @@
     if (!el) return;
     const before = el.style.getPropertyValue(prop);
     if (!state.pendingStyle) state.pendingStyle = { el, props: {} };
-    state.pendingStyle.props[prop] = before;
+    if (!Object.hasOwn(state.pendingStyle.props, prop)) state.pendingStyle.props[prop] = before;
     if (value === null) el.style.removeProperty(prop);
     else el.style.setProperty(prop, value, 'important');
     const edit = await api('/edit', 'POST', {
@@ -343,6 +461,49 @@
       page: realPage(),
     });
     post('edited', { edit });
+  }
+
+  function openVariantComparison(variants) {
+    const source = state.selected?.el;
+    if (!source || !Array.isArray(variants) || variants.length > 4) { post('error', { message: 'Select a component before comparing design directions' }); return; }
+    document.getElementById('uidit-variant-compare')?.remove();
+    const host = document.createElement('section'); host.id = 'uidit-variant-compare'; host.dataset.uiditUi = '1';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `<style>
+      :host{position:fixed;z-index:2147483646;inset:14px;display:block;color:#f7f6fc;font:13px/1.4 system-ui,sans-serif}
+      .shell{height:100%;display:flex;flex-direction:column;overflow:hidden;border:1px solid #393644;border-radius:16px;background:#18171f;box-shadow:0 18px 60px #07060b99}
+      header{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid #393644}header div{flex:1}header strong{font-size:14px}header small{display:block;margin-top:2px;color:#aaa7b7;font-size:11px}
+      button{padding:7px 10px;border:1px solid #464252;border-radius:7px;color:#f7f6fc;background:#25232d;font:600 11px system-ui;cursor:pointer}button:hover{border-color:#a99bff}button.apply{border:0;color:#171522;background:#b8aaff}
+      .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;min-height:0;flex:1;padding:14px;overflow:auto}
+      article{display:flex;flex-direction:column;gap:10px;min-width:0;padding:12px;border:1px solid #393644;border-radius:12px;background:#211f29}article h2{margin:0;font-size:12px}article p{margin:0;color:#aaa7b7;font-size:10px}
+      .preview{display:flex;align-items:center;justify-content:center;min-height:180px;flex:1;overflow:hidden;padding:14px;border:1px solid #393644;border-radius:9px;background:#f7f6fc;color:#18171f}
+      .preview>*{max-width:100%;max-height:100%;overflow:hidden;pointer-events:none}.footer{display:flex;justify-content:flex-end}
+      @media(max-width:900px){:host{inset:8px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.preview{min-height:125px}}
+    </style><div class="shell"><header><div><strong>Compare design directions</strong><small>Choose a treatment to apply it to the selected component in your page preview.</small></div><button class="close" type="button" aria-label="Close comparison">Close</button></header><div class="grid"></div></div>`;
+    shadow.querySelector('.close').addEventListener('click', () => host.remove());
+    const sourceNodes = [source, ...source.querySelectorAll('*')];
+    for (const variant of variants) {
+      if (!variant || typeof variant.name !== 'string' || !Array.isArray(variant.styles)) continue;
+      const card = document.createElement('article');
+      const title = document.createElement('h2'); title.textContent = variant.name.slice(0, 60);
+      const preview = document.createElement('div'); preview.className = 'preview';
+      const clone = source.cloneNode(true); clone.removeAttribute('id'); clone.removeAttribute('data-uidit-selected'); clone.removeAttribute('data-uidit-hover');
+      const cloneNodes = [clone, ...clone.querySelectorAll('*')];
+      for (let index = 0; index < Math.min(sourceNodes.length, cloneNodes.length, 120); index += 1) {
+        const sourceStyle = getComputedStyle(sourceNodes[index]); const cloneNode = cloneNodes[index];
+        for (let propertyIndex = 0; propertyIndex < sourceStyle.length; propertyIndex += 1) { const property = sourceStyle.item(propertyIndex); cloneNode.style.setProperty(property, sourceStyle.getPropertyValue(property)); }
+        cloneNode.removeAttribute('id'); cloneNode.removeAttribute('data-uidit-selected'); cloneNode.removeAttribute('data-uidit-hover'); cloneNode.style.pointerEvents = 'none';
+      }
+      Object.assign(clone.style, { position: 'static', inset: 'auto', width: 'auto', height: 'auto', minWidth: '0', minHeight: '0', maxWidth: '100%', maxHeight: '100%', margin: '0', transform: 'none' });
+      for (const item of variant.styles.slice(0, 8)) if (item && typeof item.property === 'string' && typeof item.value === 'string') clone.style.setProperty(item.property, item.value, 'important');
+      preview.append(clone);
+      const description = document.createElement('p'); description.textContent = variant.description ?? '';
+      const applyButton = document.createElement('button'); applyButton.type = 'button'; applyButton.className = 'apply'; applyButton.textContent = `Apply ${variant.name}`;
+      applyButton.addEventListener('click', () => { host.remove(); post('control', { action: 'applyDesignVariant', name: variant.name, styles: variant.styles.slice(0, 8) }); });
+      const footer = document.createElement('div'); footer.className = 'footer'; footer.append(applyButton);
+      card.append(title, description, preview, footer); shadow.querySelector('.grid').append(card);
+    }
+    document.body.append(host);
   }
 
   function onClick(ev) {
@@ -401,6 +562,29 @@
       const pending = pendingRequests.get(msg.id); if (!pending) return;
       clearTimeout(pending.timer); pendingRequests.delete(msg.id);
       if (msg.ok) pending.resolve(msg.result); else pending.reject(new Error(msg.error || 'UIDIT request failed'));
+      return;
+    }
+    if (msg.type === 'recordMode') { setRecording(msg.enabled === true, msg.flowId); return; }
+    if (msg.type === 'variantCompare') { openVariantComparison(msg.variants); return; }
+    if (msg.type === 'replayStep') {
+      const { id, step } = msg;
+      try {
+        const el = step?.selector ? document.querySelector(step.selector) : null;
+        if (step?.type !== 'navigation' && !el) throw new Error(`Element not found: ${step?.selector ?? 'missing selector'}`);
+        if (step?.action === 'click') el.click();
+        else if (step?.action === 'fill') {
+          if (step.sensitive) throw new Error('Sensitive form value was not recorded');
+          const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+          if (setter) setter.call(el, step.value ?? ''); else el.value = step.value ?? '';
+          el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (step?.action === 'check') {
+          el.checked = true; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (step?.action === 'submit') {
+          if (el.requestSubmit) el.requestSubmit(); else el.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        } else if (step?.type === 'navigation' && step.page && realPage() !== step.page) throw new Error(`Open ${step.page} before replaying this flow`);
+        post('replay-result', { id, ok: true });
+      } catch (error) { post('replay-result', { id, ok: false, error: error.message }); }
       return;
     }
     if (msg.type === 'state') {

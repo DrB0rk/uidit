@@ -5,3 +5,4 @@ dashboard/.astro/
 .poldergraph/
 .bizar-omp/
 *.log*.tgz
+.wrangler/

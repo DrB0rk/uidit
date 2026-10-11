@@ -1,6 +1,6 @@
 {
   "name": "uidit",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Local UI review dashboard: tag elements, comment, and make simple edits directly on a running dev server. Everything persists to .uidit for coding agents to read.",
   "type": "module",
   "bin": {
@@ -12,9 +12,11 @@
   "files": [
     "bin",
     "src",
+    "cloudflare",
     "dashboard/dist",
     "dashboard/src",
     "dashboard/astro.config.mjs",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
@@ -31,12 +33,15 @@
     "dev:dashboard": "astro dev --root dashboard",
     "prepare": "node bin/uidit.js build --if-needed",
     "start": "node bin/uidit.js start",
-    "test": "node --test test/unit.test.js test/proxy.test.js test/cli.test.js && node test/e2e.js && node test/stacks.js"
+    "test": "node --test test/unit.test.js test/proxy.test.js test/cli.test.js && node test/e2e.js && node test/relay.js && node test/stacks.js",
+    "relay:dev": "wrangler dev --config cloudflare/relay/wrangler.toml",
+    "relay:deploy": "wrangler deploy --config cloudflare/relay/wrangler.toml"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "astro": "^7.3.8",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^1.55.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -47,6 +52,7 @@
     "@vitejs/plugin-vue": "^6.0.10",
     "playwright": "^1.64.0",
     "svelte": "^5.57.2",
-    "vue": "^3.5.43"
+    "vue": "^3.5.43",
+    "wrangler": "^4.149.0"
   }
 }
