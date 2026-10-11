@@ -140,6 +140,13 @@ function extendPreviewCsp(headers, controlOrigin) {
     let styles = index('style-src');
     if (styles < 0 && index('default-src') >= 0) directives.push("style-src 'self'");
     else if (styles >= 0 && !/(^|\s)'self'(?:\s|$)/i.test(directives[styles])) directives[styles] += " 'self'";
+    // UIDIT renders positioned selection/comment/drawing previews with DOM styles.
+    // Allow inline styles in the proxied review surface while keeping script policy intact.
+    for (const name of ['style-src', 'style-src-elem', 'style-src-attr']) {
+      let at = index(name);
+      if (at < 0) { directives.push(`${name} 'unsafe-inline'`); at = directives.length - 1; }
+      else if (!/(^|\s)'unsafe-inline'(?:\s|$)/i.test(directives[at])) directives[at] += " 'unsafe-inline'";
+    }
     const frames = index('frame-src');
     if (frames < 0) directives.push(`frame-src 'self' ${controlOrigin}`);
     else {

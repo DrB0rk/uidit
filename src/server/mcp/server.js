@@ -71,14 +71,14 @@ function makeMcp({ cwd, processManager, hub }) {
   const result = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data });
   const resource = (name, uri, description, get) => server.registerResource(name, uri, { description }, async () => ({ contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(get()) }] }));
   resource('context', 'uidit://project/context', 'Project identity, revision, selection, feedback counts, and dev state', snapshot);
-  resource('session', 'uidit://session', 'Current shared feedback and preview edits', () => store.readSession(cwd));
-  resource('open-feedback', 'uidit://feedback/open', 'Unresolved review comments', () => store.readSession(cwd).comments.filter((comment) => !comment.resolved));
+  resource('session', 'uidit://session', 'Current shared feedback, visual drawing annotations (normalized page coordinates), and preview edits', () => store.readSession(cwd));
+  resource('open-feedback', 'uidit://feedback/open', 'Unresolved review comments, including visual arrow and shape annotations', () => store.readSession(cwd).comments.filter((comment) => !comment.resolved));
   resource('selected-element', 'uidit://elements/selected', 'Most recently selected live element', () => hub.selection);
   resource('pending-edits', 'uidit://edits/pending', 'Preview edits not yet applied to source', () => store.readSession(cwd).edits.filter((edit) => !edit.applied));
   resource('dev-status', 'uidit://dev/status', 'Development process state and URL', () => processManager.status());
   resource('dev-logs', 'uidit://dev/logs', 'Recent redacted development logs', () => processManager.logs());
   server.registerTool('uidit_get_context', { description: 'Get UIDIT project, review revision, selected element, capabilities, and dev status', inputSchema: {} }, async () => result(snapshot()));
-  server.registerTool('uidit_list_feedback', { description: 'List and filter review comments', inputSchema: { resolved: z.boolean().optional(), page: z.string().max(2000).optional(), elementId: z.string().max(200).optional(), query: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } }, async ({ resolved, page, elementId, query, offset = 0, limit = 50 }) => {
+  server.registerTool('uidit_list_feedback', { description: 'List review comments and their visual drawing instructions. Drawing points are normalized page coordinates; arrows run from first point to last.', inputSchema: { resolved: z.boolean().optional(), page: z.string().max(2000).optional(), elementId: z.string().max(200).optional(), query: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } }, async ({ resolved, page, elementId, query, offset = 0, limit = 50 }) => {
     const all = store.readSession(cwd).comments.filter((c) => resolved === undefined || Boolean(c.resolved) === resolved).filter((c) => !page || c.page === page).filter((c) => !elementId || c.elementId === elementId).filter((c) => !query || c.text.toLowerCase().includes(query.toLowerCase()));
     return result({ comments: all.slice(offset, offset + limit), offset, limit, total: all.length });
   });

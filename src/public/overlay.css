@@ -1,6 +1,6 @@
 iframe[data-uidit-ui] {
   position: fixed;
-  right: 16px;
+  left: 16px;
   bottom: 16px;
   width: 62px;
   height: 62px;
@@ -15,6 +15,10 @@ iframe[data-uidit-ui].uidit-open {
 }
 
 iframe[data-uidit-ui].uidit-left {
-  right: auto;
   left: 16px;
 }
+
+iframe[data-uidit-ui].uidit-center { left: calc(50vw - 160px); }
+iframe[data-uidit-ui].uidit-right { left: calc(100vw - 336px); }
+iframe[data-uidit-ui].uidit-top { top: 16px; bottom: auto; }
+iframe[data-uidit-ui].uidit-middle { top: calc(50vh - 31px); bottom: auto; }

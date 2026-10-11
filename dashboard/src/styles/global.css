@@ -532,6 +532,8 @@ kbd {
 /* In-page review surface: the application remains the full-page background. */
 .immersive { position: fixed; inset: 0; min-height: 100dvh; overflow: hidden; isolation: isolate; background: #f4f3ed; }
 .immersive-preview { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #f4f3ed; }
+.immersive.workspace-open .immersive-preview { right: auto; width: calc(100% - min(420px, 100vw)); transition: width .22s cubic-bezier(.2,.75,.24,1); }
+.immersive.workspace-open .immersive-empty { right: min(420px, 100vw); }
 .immersive-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--fg); text-align: center; }
 .immersive-empty h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
 .immersive-empty p { max-width: 520px; color: var(--fg-muted); }
@@ -586,7 +588,10 @@ kbd {
 .edit-comment { display: grid; gap: 7px; padding: 7px 0; }
 .edit-comment textarea { width: 100%; min-height: 62px; resize: vertical; }
 @media (max-width: 560px) {
-  .workspace-drawer { width: 100vw; border-left: 0; }
+  .immersive.workspace-open { display: flex; flex-direction: column; }
+  .immersive.workspace-open .immersive-preview { position: relative; inset: auto; width: 100%; height: 48dvh; flex: 0 0 48dvh; }
+  .immersive.workspace-open .immersive-empty { position: relative; inset: auto; min-height: 48dvh; flex: 0 0 48dvh; }
+  .workspace-drawer { position: relative; inset: auto; width: 100%; height: 52dvh; flex: 1 1 52dvh; border-left: 0; }
   .workspace-drawer .target { width: 100%; }
   .workspace-drawer .bar { gap: 5px; }
   .workspace-drawer .bar .field { flex: 1 1 190px; }

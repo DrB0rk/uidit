@@ -49,7 +49,7 @@ export function readConfig(cwd = process.cwd()) {
 function defaultConfig() {
   return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
-    ui: { position: 'bottom-right', defaultOpen: false, inspectionDefault: false },
+    ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false },
     mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false } };
 }
 
@@ -186,6 +186,7 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
       "elementId": "el-a1b2c3d4",                   // null = page-level note
       "page": "http://localhost:3000/cart",
       "text": "This padding is inconsistent with the card below.",
+      "drawing": null,                            // optional arrow/rectangle/ellipse/freehand with normalized page points
       "resolved": false,
       "createdAt": "ISO-8601"
     }
@@ -213,7 +214,12 @@ read \`session.json\` before making UI changes so it does not lose the user's fe
 2. Filter \`comments\` where \`resolved === false\`, ordered by \`createdAt\`.
 3. For each, locate the element via \`elements[].selector\` (fall back to
    \`selectorAlternatives\`); if the element cannot be found, report the comment against
-   the nearest \`ancestors\` entry and say so explicitly.
+   the nearest \`ancestors\` entry and say so explicitly. If a comment has a \`drawing\`,
+   treat it as a visual instruction: \`type\` is \`arrow\`, \`rectangle\`, \`ellipse\`, or
+   \`freehand\`; \`points\` are normalized 0–1 x/y coordinates over page dimensions
+   recorded in \`pageWidth\` and \`pageHeight\`. Arrows point from the first point to
+   the last. Use nearby content and comment text to identify the affected component and
+   preserve the indicated direction or highlighted area.
 4. Treat every entry in \`edits\` as an explicit, user-approved change to apply in source.
    \`before\` is what was live when the user made the change, so it doubles as a sanity check.
    \`applied: true\` means the change has been committed to source, never merely previewed.

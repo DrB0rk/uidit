@@ -46,6 +46,12 @@ export default function Dashboard() {
       body.text = body.text.trim();
       body.elementId = typeof body.elementId === 'string' ? body.elementId.slice(0, 200) : null;
       body.page = typeof body.page === 'string' ? body.page.slice(0, 2000) : null;
+      if (body.drawing && typeof body.drawing === 'object') {
+        const { type, points } = body.drawing;
+        if (!['arrow', 'rectangle', 'ellipse', 'freehand'].includes(type) || !Array.isArray(points) || points.length > 500 || points.some((point) => !Number.isFinite(point?.x) || !Number.isFinite(point?.y))) throw new Error('Invalid drawing annotation');
+        const pageWidth = Number(body.drawing.pageWidth), pageHeight = Number(body.drawing.pageHeight);
+        body.drawing = { type, points: points.map(({ x, y }) => ({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })), pageWidth: Number.isFinite(pageWidth) ? Math.max(1, Math.min(100000, pageWidth)) : null, pageHeight: Number.isFinite(pageHeight) ? Math.max(1, Math.min(100000, pageHeight)) : null };
+      } else body.drawing = null;
       return actions.comment(body);
     }
     if (msg.route === '/element') {
@@ -78,12 +84,13 @@ export default function Dashboard() {
         return;
       }
       if (msg.type === 'ready') {
-        toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position });
+        toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements });
       }
       if (msg.type === 'selected') setSelected(msg.element ?? null);
       if (msg.type === 'error') onStatus(msg.message, 'error');
       if (msg.type === 'control') {
         if (msg.action === 'inspect' && typeof msg.enabled === 'boolean') { setMode(msg.enabled ? 'inspect' : 'off'); toOverlay({ type: 'mode', mode: msg.enabled ? 'inspect' : 'off' }); }
+        if (msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) toOverlay({ type: 'drawMode', tool: msg.tool });
         if (msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim()) {
           try { await actions.comment({ text: msg.text.trim().slice(0, 4000), elementId: msg.elementId ?? null, page: typeof msg.page === 'string' ? msg.page.slice(0, 2000) : null }); onStatus('Comment saved to the shared review', 'ok'); }
           catch (error) { onStatus(error.message, 'error'); }
@@ -101,7 +108,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     toOverlay({ type: 'mode', mode });
-    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position });
+    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, comments: session.comments, elements: session.elements });
   }, [mode, session, dev, mcp.clientCount, config?.ui?.position, toOverlay]);
 
   useEffect(() => {
@@ -131,7 +138,7 @@ export default function Dashboard() {
   const select = (id) => { const item = session.elements.find((element) => element.id === id); if (!item) return; setSelected(item); toOverlay({ type: 'flashSelector', selector: item.selector }); };
   const hideControls = () => { toOverlay({ type: 'hideControls' }); setWorkspaceOpen(false); };
 
-  return <main className="immersive">
+  return <main className={`immersive${workspaceOpen ? ' workspace-open' : ''}`}>
     {targetUrl ? <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title="Live application preview" src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={() => toOverlay({ type: 'mode', mode })} /> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
     {workspaceOpen && <section className="workspace-drawer" aria-label="UIDIT review workspace">
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></header>

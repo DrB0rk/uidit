@@ -12,11 +12,27 @@
     pendingStyle: null,
   };
   let hoverEl = null;
-  let savedOutline = '';
+  let drawingTool = 'off';
+  let visualState = { comments: [], elements: [] };
+  let drawStart = null;
 
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
   const controls = document.createElement('iframe');
+  const anchorKey = 'uidit-floating-anchor';
+  let savedAnchor = null;
+  try {
+    const value = sessionStorage.getItem(anchorKey);
+    if (/^(left|center|right)-(top|middle|bottom)$/.test(value || '')) savedAnchor = value;
+  } catch {}
+  function setAnchor(value) {
+    if (!/^(left|center|right)-(top|middle|bottom)$/.test(value || '')) return;
+    const [x, y] = value.split('-');
+    controls.classList.remove('uidit-left', 'uidit-center', 'uidit-right', 'uidit-top', 'uidit-middle');
+    controls.classList.add(`uidit-${x}`);
+    if (y !== 'bottom') controls.classList.add(`uidit-${y}`);
+    controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'placement', y }, controlOrigin);
+  }
   const bootstrap = document.currentScript;
   const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:7718';
   // The dashboard may have been opened as localhost while the bridge uses the
@@ -34,6 +50,7 @@
   controls.title = 'UIDIT review controls';
   controls.setAttribute('data-uidit-ui', '1');
   (document.documentElement || document).append(controls);
+  if (savedAnchor) setAnchor(savedAnchor);
 
   const post = (type, payload = {}) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, parentOrigin);
 
@@ -112,9 +129,72 @@
     style.id = 'uidit-style';
     style.textContent =
       '[data-uidit-hover]{outline:2px solid #6d5efc !important;outline-offset:-2px !important;' +
-      'background-color:rgba(109,94,252,0.08) !important;}';
+      'background-color:rgba(109,94,252,0.08) !important;}' +
+      '[data-uidit-selected]{outline:3px solid #795cff !important;outline-offset:2px !important;' +
+      'box-shadow:0 0 0 6px rgba(121,92,255,.19) !important;}';
     document.head.append(style);
   }
+
+  const visuals = document.createElement('div');
+  visuals.id = 'uidit-visuals';
+  visuals.setAttribute('data-uidit-ui', '1');
+  visuals.style.cssText = 'position:absolute;left:0;top:0;z-index:2147483646;pointer-events:none;overflow:visible;';
+  document.documentElement.append(visuals);
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const visualPage = () => `${location.origin}${location.pathname}${location.search}`;
+  function renderVisuals() {
+    const width = Math.max(document.documentElement.scrollWidth, innerWidth);
+    const height = Math.max(document.documentElement.scrollHeight, innerHeight);
+    visuals.style.width = `${width}px`; visuals.style.height = `${height}px`; visuals.replaceChildren();
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('width', width); svg.setAttribute('height', height);
+    svg.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;';
+    const defs = document.createElementNS(svgNS, 'defs');
+    const marker = document.createElementNS(svgNS, 'marker'); marker.id = 'uidit-arrowhead'; marker.setAttribute('markerWidth','10'); marker.setAttribute('markerHeight','8'); marker.setAttribute('refX','8'); marker.setAttribute('refY','4'); marker.setAttribute('orient','auto');
+    const head = document.createElementNS(svgNS, 'path'); head.setAttribute('d','M0,0 L9,4 L0,8 Z'); head.setAttribute('fill','#785bff'); marker.append(head); defs.append(marker); svg.append(defs);
+    const matchesPage = (c) => !c.page || (() => { try { const a = new URL(c.page), current = new URL(realPage()); return a.origin === current.origin && a.pathname === current.pathname; } catch { return true; } })();
+    const elements = new Map(visualState.elements.map((e) => [e.id, e]));
+    const visibleComments = visualState.comments.filter((c) => !c.resolved && matchesPage(c));
+    for (const c of visibleComments) {
+      if (!c.drawing || !Array.isArray(c.drawing.points)) continue;
+      const pts = c.drawing.points.map((p) => ({ x: p.x * width, y: p.y * height })); if (!pts.length) continue;
+      const shape = document.createElementNS(svgNS, c.drawing.type === 'ellipse' ? 'ellipse' : c.drawing.type === 'rectangle' ? 'rect' : 'path');
+      shape.setAttribute('fill', c.drawing.type === 'ellipse' || c.drawing.type === 'rectangle' ? 'rgba(120,91,255,.10)' : 'none'); shape.setAttribute('stroke','#785bff'); shape.setAttribute('stroke-width','3'); shape.setAttribute('stroke-linecap','round'); shape.setAttribute('stroke-linejoin','round');
+      if (c.drawing.type === 'rectangle') { shape.setAttribute('x',Math.min(pts[0].x,pts.at(-1).x)); shape.setAttribute('y',Math.min(pts[0].y,pts.at(-1).y)); shape.setAttribute('width',Math.abs(pts.at(-1).x-pts[0].x)); shape.setAttribute('height',Math.abs(pts.at(-1).y-pts[0].y)); }
+      else if (c.drawing.type === 'ellipse') { shape.setAttribute('cx',(pts[0].x+pts.at(-1).x)/2); shape.setAttribute('cy',(pts[0].y+pts.at(-1).y)/2); shape.setAttribute('rx',Math.max(2,Math.abs(pts.at(-1).x-pts[0].x)/2)); shape.setAttribute('ry',Math.max(2,Math.abs(pts.at(-1).y-pts[0].y)/2)); }
+      else { shape.setAttribute('d',pts.map((p,i)=>`${i?'L':'M'}${p.x} ${p.y}`).join(' ')); if (c.drawing.type === 'arrow') shape.setAttribute('marker-end','url(#uidit-arrowhead)'); }
+      const title = document.createElementNS(svgNS,'title'); title.textContent = c.text; shape.append(title); svg.append(shape);
+    }
+    visuals.append(svg);
+    visibleComments.filter((c) => !c.drawing).forEach((c, index) => {
+      const record = elements.get(c.elementId); let el = null;
+      try { if (record?.selector) el = document.querySelector(record.selector); } catch {}
+      const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
+      markerNode.style.cssText='position:absolute;pointer-events:auto;left:0;top:0;transform:translate(-50%,-50%);width:27px;height:27px;border:2px solid white;border-radius:50%;background:#785bff;color:white;font:700 12px system-ui;box-shadow:0 3px 14px #17132270;cursor:pointer;';
+      const rect=el?.getBoundingClientRect(); const x=rect?rect.left+scrollX+rect.width/2:width-34; const y=rect?rect.top+scrollY:24+index*34;
+      markerNode.style.left=`${x}px`; markerNode.style.top=`${y}px`;
+      const pop=document.createElement('span');pop.textContent=c.text;pop.style.cssText='display:none;position:absolute;left:30px;top:-4px;min-width:180px;max-width:280px;padding:9px 11px;border-radius:9px;background:#211e2e;color:#fff;font:12px/1.45 system-ui;box-shadow:0 8px 28px #17132255;';markerNode.append(pop);
+      markerNode.addEventListener('mouseenter',()=>pop.style.display='block'); markerNode.addEventListener('mouseleave',()=>pop.style.display='none');
+      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();if(el){restoreSelected();state.selected={el,record};el.setAttribute('data-uidit-selected','1');el.scrollIntoView({block:'center',behavior:'smooth'});}});
+      visuals.append(markerNode);
+    });
+  }
+  let drawSvg = null, drawShape = null;
+  function setDrawingTool(tool) {
+    drawingTool = tool; drawStart = null;
+    if (drawSvg) drawSvg.remove(); drawSvg = null;
+    document.documentElement.style.cursor = tool === 'off' ? '' : 'crosshair';
+    if (tool === 'off') return;
+    drawSvg = document.createElementNS(svgNS,'svg'); drawSvg.setAttribute('viewBox',`0 0 ${innerWidth} ${innerHeight}`);
+    drawSvg.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483645;pointer-events:auto;touch-action:none;cursor:crosshair;';
+    const defs=document.createElementNS(svgNS,'defs'), arrow=document.createElementNS(svgNS,'marker'), arrowPath=document.createElementNS(svgNS,'path');arrow.id='uidit-arrowhead';arrow.setAttribute('markerWidth','10');arrow.setAttribute('markerHeight','8');arrow.setAttribute('refX','8');arrow.setAttribute('refY','4');arrow.setAttribute('orient','auto');arrowPath.setAttribute('d','M0,0 L9,4 L0,8 Z');arrowPath.setAttribute('fill','#785bff');arrow.append(arrowPath);defs.append(arrow);drawSvg.append(defs);
+    document.documentElement.append(drawSvg);
+    drawSvg.addEventListener('pointerdown',e=>{if(e.target.closest?.('[data-uidit-ui]'))return;drawStart={x:e.clientX,y:e.clientY};drawShape=document.createElementNS(svgNS,tool==='ellipse'?'ellipse':tool==='rectangle'?'rect':'path');drawShape.setAttribute('fill',tool==='freehand'||tool==='arrow'?'none':'rgba(120,91,255,.10)');drawShape.setAttribute('stroke','#785bff');drawShape.setAttribute('stroke-width','3');drawShape.setAttribute('stroke-linecap','round');drawShape.setAttribute('stroke-linejoin','round');if(tool==='arrow')drawShape.setAttribute('marker-end','url(#uidit-arrowhead)');drawSvg.append(drawShape);drawSvg.setPointerCapture(e.pointerId);e.preventDefault()});
+    drawSvg.addEventListener('pointermove',e=>{if(!drawStart||!drawShape)return;const x=e.clientX,y=e.clientY;if(tool==='rectangle'){drawShape.setAttribute('x',Math.min(drawStart.x,x));drawShape.setAttribute('y',Math.min(drawStart.y,y));drawShape.setAttribute('width',Math.abs(x-drawStart.x));drawShape.setAttribute('height',Math.abs(y-drawStart.y))}else if(tool==='ellipse'){drawShape.setAttribute('cx',(drawStart.x+x)/2);drawShape.setAttribute('cy',(drawStart.y+y)/2);drawShape.setAttribute('rx',Math.abs(x-drawStart.x)/2);drawShape.setAttribute('ry',Math.abs(y-drawStart.y)/2)}else drawShape.setAttribute('d',`${drawShape.getAttribute('d')||`M${drawStart.x} ${drawStart.y}`} L${x} ${y}`);e.preventDefault()});
+    drawSvg.addEventListener('pointerup',async e=>{if(!drawStart||!drawShape)return;const start=drawStart;const end={x:e.clientX,y:e.clientY};drawStart=null;const pageWidth=Math.max(document.documentElement.scrollWidth,innerWidth),pageHeight=Math.max(document.documentElement.scrollHeight,innerHeight);const points=tool==='freehand'?parsePath(drawShape.getAttribute('d')).slice(0,500).map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight})):[start,end].map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight}));drawSvg.remove();drawSvg=null;document.documentElement.style.cursor='';drawingTool='off';try{await api('/comment','POST',{text:`${tool[0].toUpperCase()+tool.slice(1)} annotation for the coding agent`,elementId:null,page:realPage(),drawing:{type:tool,points,pageWidth,pageHeight}});post('drawn',{tool})}catch(err){post('error',{message:err.message})}});
+  }
+  function parsePath(d){return [...(d||'').matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map(m=>({x:Number(m[1]),y:Number(m[2])}));}
+  addEventListener('resize',renderVisuals); addEventListener('scroll',renderVisuals,true);
 
   // Highlight via attribute, never inline styles: the element's own style attribute
   // must stay pristine so recorded `before` values are the real page values.
@@ -192,6 +272,7 @@
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') {
+      setDrawingTool('off');
       restoreSelected();
       post('selected', { element: null });
     }
@@ -201,7 +282,18 @@
     const msg = ev.data;
     if (ev.source === controls.contentWindow && ev.origin === controlOrigin && msg?.source === 'uidit-control') {
       if (msg.type === 'resize') controls.classList.toggle('uidit-open', msg.open === true);
+      if (msg.type === 'action' && msg.action === 'move' && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
+        const rect = controls.getBoundingClientRect();
+        const x = Math.max(0, Math.min(innerWidth, rect.left + msg.x));
+        const y = Math.max(0, Math.min(innerHeight, rect.top + msg.y));
+        const column = x < innerWidth / 3 ? 'left' : x < innerWidth * 2 / 3 ? 'center' : 'right';
+        const row = y < innerHeight / 3 ? 'top' : y < innerHeight * 2 / 3 ? 'middle' : 'bottom';
+        savedAnchor = `${column}-${row}`;
+        try { sessionStorage.setItem(anchorKey, savedAnchor); } catch {}
+        setAnchor(savedAnchor);
+      }
       if (msg.type === 'action' && msg.action === 'inspect' && typeof msg.enabled === 'boolean') post('control', { action: 'inspect', enabled: msg.enabled });
+      if (msg.type === 'action' && msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) post('control', { action: 'draw', tool: msg.tool });
       if (msg.type === 'action' && msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) post('control', { action: 'comment', text: msg.text.trim(), page: realPage(), elementId: state.selected?.record.id ?? null });
       if (msg.type === 'action' && msg.action === 'workspace' && ['feedback', 'inspect', 'changes', 'server', 'agents', 'settings'].includes(msg.tab)) post('control', { action: 'workspace', tab: msg.tab });
       if (msg.type === 'action' && msg.action === 'hide') controls.hidden = true;
@@ -215,10 +307,11 @@
       return;
     }
     if (msg.type === 'state') {
-      const left = msg.position === 'bottom-left';
-      controls.classList.toggle('uidit-left', left);
+      if (!savedAnchor) setAnchor(msg.position === 'bottom-right' ? 'right-bottom' : 'left-bottom');
+      if (Array.isArray(msg.comments) && Array.isArray(msg.elements)) { visualState = { comments: msg.comments, elements: msg.elements }; renderVisuals(); }
       controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'state', ...msg }, controlOrigin); return;
     }
+    if (msg.type === 'drawMode') { setDrawingTool(msg.tool); return; }
     if (msg.type === 'escape') { controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin); }
     if (msg.type === 'hideControls') { controls.hidden = true; return; }
     handle(msg).catch((err) => post('error', { message: err.message }));
@@ -261,6 +354,7 @@
         el.setAttribute('data-uidit-selected', '1');
         paint(el, true);
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        renderVisuals();
         api('/element', 'POST', state.selected.record)
           .then(({ element }) => post('selected', { element }))
           .catch((err) => post('error', { message: err.message }));
