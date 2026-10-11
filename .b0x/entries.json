@@ -1,0 +1,41 @@
+[
+  {
+    "id": "2fbe300e-2070-4931-b9c1-ae4a36c116a6",
+    "kind": "preference",
+    "text": "Verified contrast fix: Split the accent into two tokens: --accent (fill, white text on it) and --accent-text oklch(0.78 0.13 283) for all text/icons. Verified 7.86:1 on canvas, 7.12:1 on surface, 6.31:1 on raised.",
+    "tags": [
+      "contrast",
+      "audit-fix"
+    ],
+    "source": "diagnostic audit (contrast)",
+    "reinforcements": 1,
+    "lastReinforced": "2026-10-11T08:18:53.207Z",
+    "created": "2026-10-11T08:18:53.207Z"
+  },
+  {
+    "id": "2ff01c04-3402-4568-95df-6f2614139d54",
+    "kind": "preference",
+    "text": "Verified html fix: Give every input a real <label for>, use aria-labels for the paired value inputs, and .sr-only text on icon-only buttons. Verified 0 unnamed controls across all inputs in the live DOM via a full a11y sweep.",
+    "tags": [
+      "html",
+      "audit-fix"
+    ],
+    "source": "diagnostic audit (html)",
+    "reinforcements": 1,
+    "lastReinforced": "2026-10-11T08:18:55.890Z",
+    "created": "2026-10-11T08:18:55.890Z"
+  },
+  {
+    "id": "41c2b71e-3ad4-4d6d-9b43-ae1b1234a660",
+    "kind": "preference",
+    "text": "Verified target fix: Set every control to min-height 32px (28px for .sm), give icon buttons a ::after hit-area expander, and a 28px min-height on selector buttons. Verified 0 of 38 controls under 24px in the rendered DOM.",
+    "tags": [
+      "target",
+      "audit-fix"
+    ],
+    "source": "diagnostic audit (target)",
+    "reinforcements": 1,
+    "lastReinforced": "2026-10-11T08:18:58.670Z",
+    "created": "2026-10-11T08:18:58.670Z"
+  }
+]

@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import {
+  Check, X, Copy, MousePointerClick, Trash2, RotateCcw, ClipboardCopy, Square,
+} from 'lucide-react';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : '');
 
@@ -9,91 +12,182 @@ function SelectionBox({ selected, onComment, onOverlay, busy }) {
   const [cls, setCls] = useState('');
   const [attrName, setAttrName] = useState('');
   const [attrVal, setAttrVal] = useState('');
+  const id = useId();
 
   if (!selected) {
     return (
       <div className="empty-state">
-        Click any element in the preview to tag it.
+        Click an element in the preview to tag it.
         <br />
-        Hold <kbd>Text</kbd> mode to edit copy in place.
+        Pick <kbd>Inspect</kbd> to select, or <kbd>Text</kbd> to edit copy in place.
       </div>
     );
   }
 
   return (
-    <div className="selection">
+    <section className="selection" aria-label="Selected element">
       <div className="sel-head">
-        <code id="sel-selector">{selected.selector}</code>
+        <code id="sel-selector" title={selected.selector}>{selected.selector}</code>
         <button
-          className="btn tiny"
+          type="button"
+          className="btn icon ghost"
+          title="Copy selector"
           onClick={() => navigator.clipboard?.writeText(selected.selector)}
         >
-          copy
+          <Copy size={15} aria-hidden="true" />
+          <span className="sr-only">Copy selector to clipboard</span>
         </button>
       </div>
+
       <div className="sel-text">{selected.text || <em>{selected.tag} (no text)</em>}</div>
+
+      <label className="sr-only" htmlFor={`${id}-comment`}>Comment on the selected element</label>
       <textarea
-        id="comment"
+        id={`${id}-comment`}
+        data-testid="comment"
         className="comment"
         rows={3}
         value={text}
-        placeholder="Comment on the selected element…"
+        placeholder="What should change here?"
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
+            e.preventDefault();
+            onComment(text.trim()).then(() => setText(''));
+          }
+        }}
       />
       <div className="row">
         <button
+          type="button"
           id="comment-send"
-          className="btn primary small"
+          className="btn primary sm"
           disabled={!text.trim() || busy}
-          onClick={async () => { await onComment(text.trim()); setText(''); }}
+          onClick={async () => {
+            await onComment(text.trim());
+            setText('');
+          }}
         >
           Comment
         </button>
-        <span className="muted">{selected.tag} · {selected.page?.replace(/^https?:\/\//, '')}</span>
+        <span className="muted hint">{selected.tag} · {selected.page?.replace(/^https?:\/\//, '')}</span>
       </div>
 
       <details className="tools">
         <summary>Quick edits</summary>
+
         <div className="tool-row">
-          <label>Text</label>
-          <button className="btn small" onClick={() => onOverlay({ type: 'mode', mode: 'text' })}>Edit in place</button>
-          <button className="btn small" onClick={() => onOverlay({ type: 'commitText' })}>Save text</button>
+          <span className="sr-only" id={`${id}-text-label`}>Text editing</span>
+          <label htmlFor={`${id}-text-label`}>Text</label>
+          <div className="control">
+            <button type="button" className="btn sm" onClick={() => onOverlay({ type: 'mode', mode: 'text' })}>
+              Edit in place
+            </button>
+            <button type="button" className="btn sm" onClick={() => onOverlay({ type: 'commitText' })}>
+              Save text
+            </button>
+          </div>
         </div>
+
         <div className="tool-row">
-          <label>Style</label>
-          <input id="style-prop" value={prop} onChange={(e) => setProp(e.target.value)} placeholder="padding" />
-          <input id="style-val" value={val} onChange={(e) => setVal(e.target.value)} placeholder="16px" />
-          <button className="btn small" onClick={() => onOverlay({ type: 'style', property: prop, value: val })}>
-            Apply
-          </button>
+          <label htmlFor={`${id}-style-prop`}>Style</label>
+          <div className="control">
+            <input
+              id={`${id}-style-prop`}
+              data-testid="style-prop"
+              value={prop}
+              onChange={(e) => setProp(e.target.value)}
+              placeholder="property"
+              spellCheck="false"
+            />
+            <input
+              id={`${id}-style-val`}
+              data-testid="style-val"
+              aria-label={`${prop || 'CSS'} value`}
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              placeholder="value"
+              spellCheck="false"
+            />
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => onOverlay({ type: 'style', property: prop, value: val })}
+            >
+              Apply
+            </button>
+          </div>
         </div>
+
         <div className="tool-row">
-          <label>Class</label>
-          <input value={cls} onChange={(e) => setCls(e.target.value)} placeholder="is-active" />
-          <button className="btn small" disabled={!cls} onClick={() => onOverlay({ type: 'toggleClass', name: cls })}>
-            Toggle
-          </button>
+          <label htmlFor={`${id}-class`}>Class</label>
+          <div className="control">
+            <input
+              id={`${id}-class`}
+              value={cls}
+              onChange={(e) => setCls(e.target.value)}
+              placeholder="is-active"
+              spellCheck="false"
+            />
+            <button
+              type="button"
+              className="btn sm"
+              disabled={!cls}
+              onClick={() => onOverlay({ type: 'toggleClass', name: cls })}
+            >
+              Toggle
+            </button>
+          </div>
         </div>
+
         <div className="tool-row">
-          <label>Attr</label>
-          <input value={attrName} onChange={(e) => setAttrName(e.target.value)} placeholder="aria-label" />
-          <input value={attrVal} onChange={(e) => setAttrVal(e.target.value)} placeholder="Close" />
-          <button
-            className="btn small"
-            disabled={!attrName}
-            onClick={() => onOverlay({ type: 'attribute', property: attrName, value: attrVal })}
-          >
-            Set
-          </button>
+          <label htmlFor={`${id}-attr`}>Attribute</label>
+          <div className="control">
+            <input
+              id={`${id}-attr`}
+              value={attrName}
+              onChange={(e) => setAttrName(e.target.value)}
+              placeholder="aria-label"
+              spellCheck="false"
+            />
+            <input
+              id={`${id}-attr-val`}
+              aria-label={attrName ? `${attrName} value` : 'Attribute value'}
+              value={attrVal}
+              onChange={(e) => setAttrVal(e.target.value)}
+              placeholder="Close"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && attrName) {
+                  onOverlay({ type: 'attribute', property: attrName, value: attrVal });
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn sm"
+              disabled={!attrName}
+              onClick={() => onOverlay({ type: 'attribute', property: attrName, value: attrVal })}
+            >
+              Set
+            </button>
+          </div>
         </div>
+
         <div className="tool-row">
-          <button className="btn small danger" onClick={() => onOverlay({ type: 'remove' })}>
-            Remove (preview only)
-          </button>
-          <button className="btn small" onClick={() => onOverlay({ type: 'revert' })}>Revert selection</button>
+          <span aria-hidden="true" />
+          <div className="control">
+            <button type="button" className="btn sm danger" onClick={() => onOverlay({ type: 'remove' })}>
+              <Trash2 size={14} aria-hidden="true" />
+              Hide element
+            </button>
+            <button type="button" className="btn sm ghost" onClick={() => onOverlay({ type: 'revert' })}>
+              <RotateCcw size={14} aria-hidden="true" />
+              Clear selection
+            </button>
+          </div>
         </div>
       </details>
-    </div>
+    </section>
   );
 }
 
@@ -101,37 +195,56 @@ function CommentItem({ comment, element, onToggle, onDelete, onSelect }) {
   return (
     <li className={`item${comment.resolved ? ' resolved' : ''}`}>
       <div className="item-top">
-        <span className="tag">{comment.resolved ? 'resolved' : 'open'}</span>
-        <code className="item-selector" onClick={() => element && onSelect(element.id)}>
-          {element?.selector ?? 'page'}
-        </code>
+        <span className={`tag${comment.resolved ? ' done' : ''}`}>
+          {comment.resolved ? <Check size={11} aria-hidden="true" /> : null}
+          {comment.resolved ? 'Resolved' : 'Open'}
+        </span>
+        <button type="button" className="item-selector" onClick={() => element && onSelect(element.id)}>
+          {element?.selector ?? 'page-level note'}
+        </button>
         <span className="item-actions">
-          <button className="btn tiny" onClick={() => onToggle(comment)}>
-            {comment.resolved ? 'Reopen' : 'Resolve'}
+          <button type="button" className="btn sm ghost" onClick={() => onToggle(comment)}>
+            {comment.resolved ? <RotateCcw size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
+            <span className="sr-only">{comment.resolved ? 'Reopen comment' : 'Resolve comment'}</span>
           </button>
-          <button className="btn tiny" onClick={() => onDelete(comment)}>✕</button>
+          <button type="button" className="btn sm ghost" onClick={() => onDelete(comment)}>
+            <X size={14} aria-hidden="true" />
+            <span className="sr-only">Delete comment</span>
+          </button>
         </span>
       </div>
       <div className="item-text">{comment.text}</div>
-      <div className="item-meta"><span>{fmt(comment.createdAt)}</span>{comment.page && <span>{comment.page}</span>}</div>
+      <div className="item-meta">
+        <span>{fmt(comment.createdAt)}</span>
+        {comment.page && <span>{comment.page.replace(/^https?:\/\//, '')}</span>}
+      </div>
     </li>
   );
 }
 
 function ElementItem({ element, selected, commentCount, onSelect, onDelete }) {
   return (
-    <li className={`item${selected ? ' selected' : ''}`} onClick={() => onSelect(element.id)}>
+    <li className={`item${selected ? ' selected' : ''}`}>
       <div className="item-top">
         <span className="tag">{element.tag}</span>
-        <code className="item-selector">{element.selector}</code>
+        <button type="button" className="item-selector" onClick={() => onSelect(element.id)}>
+          {element.selector}
+        </button>
         <span className="item-actions">
-          <button className="btn tiny" onClick={(e) => { e.stopPropagation(); onDelete(element); }}>✕</button>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={(e) => { e.stopPropagation(); onDelete(element); }}
+          >
+            <X size={14} aria-hidden="true" />
+            <span className="sr-only">Remove tagged element</span>
+          </button>
         </span>
       </div>
       {element.text && <div className="item-text muted">{element.text.slice(0, 140)}</div>}
       <div className="item-meta">
-        <span>{commentCount} comment(s)</span>
-        <span>{element.ancestors?.slice(-2).join(' ← ')}</span>
+        <span>{commentCount} comment{commentCount === 1 ? '' : 's'}</span>
+        {element.ancestors?.length > 0 && <span>{element.ancestors.slice(-2).join(' ← ')}</span>}
       </div>
     </li>
   );
@@ -141,13 +254,22 @@ function EditItem({ edit, element, onToggle, onDelete }) {
   return (
     <li className="item">
       <div className="item-top">
-        <span className="tag">{edit.kind}</span>
-        <code className="item-selector">
+        <span className={`tag${edit.applied ? ' done' : ''}`}>
+          {edit.applied ? <Check size={11} aria-hidden="true" /> : null}
+          {edit.kind}
+        </span>
+        <span className="item-selector" style={{ cursor: 'default' }}>
           {element?.selector ?? edit.elementId}{edit.property ? ` · ${edit.property}` : ''}
-        </code>
+        </span>
         <span className="item-actions">
-          <button className="btn tiny" onClick={() => onToggle(edit)}>{edit.applied ? 'applied ✓' : 'mark applied'}</button>
-          <button className="btn tiny" onClick={() => onDelete(edit)}>✕</button>
+          <button type="button" className="btn sm ghost" onClick={() => onToggle(edit)}>
+            {edit.applied ? <RotateCcw size={14} aria-hidden="true" /> : <Square size={12} aria-hidden="true" />}
+            <span className="sr-only">{edit.applied ? 'Mark as not applied' : 'Mark as applied in source'}</span>
+          </button>
+          <button type="button" className="btn sm ghost" onClick={() => onDelete(edit)}>
+            <X size={14} aria-hidden="true" />
+            <span className="sr-only">Delete edit</span>
+          </button>
         </span>
       </div>
       <div className="item-text">
@@ -155,7 +277,10 @@ function EditItem({ edit, element, onToggle, onDelete }) {
         {edit.before != null && ' → '}
         {edit.after == null ? <em>removed</em> : <span className="diff-after">{String(edit.after)}</span>}
       </div>
-      <div className="item-meta"><span>{fmt(edit.createdAt)}</span></div>
+      <div className="item-meta">
+        <span>{edit.applied ? 'applied in source' : 'preview only'}</span>
+        <span>{fmt(edit.createdAt)}</span>
+      </div>
     </li>
   );
 }
@@ -181,6 +306,12 @@ export function toMarkdown(session) {
   return lines.join('\n');
 }
 
+const TABS = [
+  ['feedback', 'Feedback'],
+  ['elements', 'Elements'],
+  ['edits', 'Edits'],
+];
+
 export default function Sidebar({ session, selectedId, onSelect, actions, onOverlay, onStatus }) {
   const [tab, setTab] = useState('feedback');
   const [busy, setBusy] = useState(false);
@@ -190,9 +321,10 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
     try {
       setBusy(true);
       await fn(...args);
-      onStatus(message, 'ok');
+      if (message) onStatus(message, 'ok');
     } catch (err) {
       onStatus(err.message, 'error');
+      throw err;
     } finally {
       setBusy(false);
     }
@@ -200,39 +332,56 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
 
   const comment = run(async (text) => {
     await actions.comment({ elementId: selectedId ?? null, text, page: selected?.page ?? null });
-  }, 'comment saved to .uidit');
+  }, 'Comment saved to .uidit');
 
-  const toggleComment = run((c) => actions.patch('comments', c.id, { resolved: !c.resolved }), 'comment updated');
-  const toggleEdit = run((e) => actions.patch('edits', e.id, { applied: !e.applied }), 'edit updated');
-  const drop = run((collection, id) => actions.remove(collection, id), 'removed');
+  const toggleComment = run((c) => actions.patch('comments', c.id, { resolved: !c.resolved }));
+  const toggleEdit = run((e) => actions.patch('edits', e.id, { applied: !e.applied }));
+  const drop = run((collection, id) => actions.remove(collection, id), 'Removed');
 
   const openCount = session.comments.filter((c) => !c.resolved).length;
+  const pendingEdits = session.edits.filter((e) => !e.applied).length;
+  const counts = { feedback: openCount, elements: session.elements.length, edits: pendingEdits };
+
+  const copyFeedback = async () => {
+    try {
+      await navigator.clipboard.writeText(toMarkdown(session));
+      onStatus('Feedback copied as Markdown', 'ok');
+    } catch {
+      onStatus('Clipboard blocked by the browser', 'error');
+    }
+  };
 
   return (
-    <aside className="side">
-      <div className="tabs" role="tablist">
-        {[
-          ['feedback', `Feedback${openCount ? ` (${openCount})` : ''}`],
-          ['elements', `Elements (${session.elements.length})`],
-          ['edits', `Edits (${session.edits.filter((e) => !e.applied).length})`],
-        ].map(([key, label]) => (
+    <aside className="side" aria-label="Review panel">
+      <div className="tabs" role="tablist" aria-label="Review views">
+        {TABS.map(([key, label]) => (
           <button
             key={key}
-            className={`tab${tab === key ? ' active' : ''}`}
+            type="button"
+            className="tab"
             role="tab"
+            id={`tab-${key}`}
             aria-selected={tab === key}
+            aria-controls={`panel-${key}`}
             onClick={() => setTab(key)}
           >
             {label}
+            {counts[key] > 0 && (
+              <span className={`count${key === 'feedback' && openCount ? ' hot' : ''}`}>{counts[key]}</span>
+            )}
           </button>
         ))}
       </div>
 
       {tab === 'feedback' && (
-        <div className="panel">
+        <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby="tab-feedback">
           <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} />
           <ul className="list">
-            {session.comments.length === 0 && <li className="empty-state">No feedback yet.</li>}
+            {session.comments.length === 0 && (
+              <li className="empty-state">
+                Nothing tagged yet. Click an element in the preview, then leave a comment.
+              </li>
+            )}
             {[...session.comments].reverse().map((c) => (
               <CommentItem
                 key={c.id}
@@ -248,9 +397,11 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       )}
 
       {tab === 'elements' && (
-        <div className="panel">
+        <div className="panel" role="tabpanel" id="panel-elements" aria-labelledby="tab-elements">
           <ul className="list">
-            {session.elements.length === 0 && <li className="empty-state">Click an element in the preview to tag it.</li>}
+            {session.elements.length === 0 && (
+              <li className="empty-state">Click an element in the preview to tag it.</li>
+            )}
             {session.elements.map((e) => (
               <ElementItem
                 key={e.id}
@@ -266,9 +417,13 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       )}
 
       {tab === 'edits' && (
-        <div className="panel">
+        <div className="panel" role="tabpanel" id="panel-edits" aria-labelledby="tab-edits">
           <ul className="list">
-            {session.edits.length === 0 && <li className="empty-state">No edits yet — use Quick edits on a selected element.</li>}
+            {session.edits.length === 0 && (
+              <li className="empty-state">
+                No quick edits yet. Select an element and use Quick edits to try a change in the preview.
+              </li>
+            )}
             {[...session.edits].reverse().map((e) => (
               <EditItem
                 key={e.id}
@@ -283,15 +438,15 @@ export default function Sidebar({ session, selectedId, onSelect, actions, onOver
       )}
 
       <footer className="foot">
-        <button
-          className="btn tiny"
-          onClick={() => {
-            navigator.clipboard?.writeText(toMarkdown(session));
-            onStatus('feedback copied as Markdown', 'ok');
-          }}
-        >
-          Copy feedback as Markdown
+        <button type="button" className="btn sm ghost" onClick={copyFeedback}>
+          <ClipboardCopy size={14} aria-hidden="true" />
+          Copy as Markdown
         </button>
+        <span className="spacer" />
+        <span className="muted hint foot-sel" title={selected?.selector ?? 'No element selected'}>
+          <MousePointerClick size={13} aria-hidden="true" />
+          {selected ? selected.selector : 'no selection'}
+        </span>
       </footer>
     </aside>
   );

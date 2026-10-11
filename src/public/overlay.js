@@ -33,7 +33,11 @@
     const origin = window.__UIDIT_TARGET__;
     if (!origin) return location.href;
     const path = location.pathname.replace(/^\/proxy/, '') || '/';
-    return `${origin}${path}${location.search}`;
+    // uidit's own cache-buster (?r=) is not part of the real page URL.
+    const params = new URLSearchParams(location.search);
+    params.delete('r');
+    const search = params.toString();
+    return `${origin}${path}${search ? `?${search}` : ''}`;
   };
 
   function uniqueSelector(el) {

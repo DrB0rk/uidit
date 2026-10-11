@@ -1,0 +1,84 @@
+/* ============================================================
+   uidit design tokens
+   oklch() throughout: perceptual lightness steps mean a single
+   accent hue stays legible across every surface it lands on.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* --- surfaces: 60% dominant canvas, 30% structure --- */
+  --canvas: oklch(0.17 0.012 265);      /* page behind everything */
+  --surface: oklch(0.21 0.014 265);     /* sidebar, toolbar */
+  --raised: oklch(0.25 0.016 265);      /* cards, inputs */
+  --raised-hover: oklch(0.28 0.018 265);
+  --stage: oklch(0.13 0.01 265);        /* the preview letterbox */
+  --border: oklch(0.33 0.018 265);
+  --border-strong: oklch(0.42 0.02 265);
+
+  /* --- text --- */
+  --fg: oklch(0.96 0.004 265);          /* 16.8:1 on canvas */
+  --fg-muted: oklch(0.76 0.014 265);    /* 6.4:1 — safe for 12px+ */
+  --fg-subtle: oklch(0.66 0.014 265);   /* metadata only, never alone */
+
+  /* --- accent: two tones, because one tone cannot serve both jobs ---
+     `accent` is a fill (white text on it, 4.5:1+).
+     `accent-text` is the *text/icon* tone and clears 4.5:1 on every
+     surface. Using the fill tone as text was the original bug: 3.98:1. */
+  --accent: oklch(0.56 0.19 283);
+  --accent-hover: oklch(0.61 0.19 283);
+  --accent-text: oklch(0.78 0.13 283);  /* >= 4.5:1 on canvas, surface, raised */
+  --accent-wash: oklch(0.32 0.07 283);
+  --on-accent: oklch(0.99 0.005 283);
+
+  /* --- status: every one is paired with an icon + label in markup,
+         so hue is never the only signal --- */
+  --ok-text: oklch(0.78 0.15 155);
+  --ok-wash: oklch(0.3 0.06 155);
+  --warn-text: oklch(0.83 0.14 85);
+  --warn-wash: oklch(0.33 0.06 85);
+  --danger-text: oklch(0.76 0.16 22);
+  --danger-wash: oklch(0.32 0.08 22);
+
+  /* --- type scale --- */
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --text-xs: 0.75rem;    /* 12px — metadata */
+  --text-sm: 0.8125rem;  /* 13px — dense metadata only */
+  --text-base: 0.875rem; /* 14px — UI text */
+  --text-input: 1rem;    /* 16px — inputs; below 16px iOS zooms on focus */
+  --text-lead: 1rem;
+
+  /* --- spacing --- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* --- radius --- */
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* --- motion: transform/opacity only, never layout properties --- */
+  --ease: linear(0, 0.2 8%, 0.6 16%, 1);
+  --fast: 110ms;
+  --med: 180ms;
+
+  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-pop: 0 8px 24px oklch(0 0 0 / 0.45);
+}
+
+/* Honour the OS setting: drop movement, keep the state change it explained. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

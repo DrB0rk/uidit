@@ -62,17 +62,18 @@ try {
   const selectedSelector = await page.textContent('#sel-selector');
   check('element tagged with selector', () => assert.match(selectedSelector, /pay|BUTTON/i));
 
-  await page.fill('#comment', 'Make this button full width on mobile.');
+  await page.fill('[data-testid="comment"]', 'Make this button full width on mobile.');
   await page.click('#comment-send');
   await page.waitForSelector('.item .item-text');
 
   await page.click('details.tools summary');
-  await page.fill('#style-prop', 'padding');
-  await page.fill('#style-val', '16px');
+  await page.fill('[data-testid="style-prop"]', 'padding');
+  await page.fill('[data-testid="style-val"]', '16px');
   await page.click('details.tools button:has-text("Apply")');
-  await page.waitForSelector('[data-panel="edits"], .tab:has-text("Edits (1)")');
+  // Counts render in their own element, so assert the role, not the label text.
+  await page.waitForSelector('#tab-edits .count');
 
-  await page.click('.tab:has-text("Edits")');
+  await page.click('#tab-edits');
   await page.waitForSelector('.item .diff-after');
 
   const previewPadding = await frame.locator('#pay').evaluate((el) => getComputedStyle(el).padding);
@@ -102,7 +103,7 @@ try {
   const s = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8'));
   s.comments[0].resolved = true;
   fs.writeFileSync(`${ROOT}/.uidit/session.json`, JSON.stringify(s, null, 2));
-  await page.click('.tab:has-text("Feedback")');
+  await page.click('#tab-feedback');
   await page.waitForSelector('.item.resolved', { timeout: 5000 });
   check('external agent edit syncs over SSE', () => assert.ok(true));
 

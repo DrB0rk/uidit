@@ -276,6 +276,8 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         if (!config?.targetUrl) return json(res, 409, { error: 'no target url set' });
         const target = safeTargetUrl(config.targetUrl);
         target.pathname = `${target.pathname.replace(/\/$/, '')}${route.slice('/proxy'.length)}`;
+        // uidit's own reload cache-buster is not part of the target's URL space.
+        url.searchParams.delete('r');
         target.search = url.search;
         return proxyRequest(req, res, target);
       }

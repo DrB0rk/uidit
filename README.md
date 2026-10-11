@@ -71,6 +71,21 @@ dashboard/              Astro 7 app, React island, built to dashboard/dist
 The dashboard UI is an [Astro](https://astro.build) app; all runtime data comes from
 the uidit server over `fetch` + `EventSource`, so nothing is baked at build time.
 
+## Dashboard UI
+
+Built to the [b0x](https://skills.omp.sh) UI/UX baseline and verified against it:
+
+- **Tokens** (`dashboard/src/styles/tokens.css`) are `oklch()` throughout, with the
+  accent split into a fill tone and a text tone. One tone cannot do both jobs — the
+  old `#6d5efc` was 3.98:1 as text on panels.
+- **Accessibility**: every control has an accessible name, a 2px `:focus-visible` ring,
+  and a ≥24px pointer target. Status is always paired with an icon and a label, so
+  colour is never the only signal.
+- **Keyboard**: `1` / `2` switch modes, `Cmd/Ctrl+Enter` posts a comment, `Escape`
+  closes the discover list, and tab order follows the visual layout.
+- **Motion**: transform/opacity only, honouring `prefers-reduced-motion`.
+- **Responsive**: the panel stacks under the preview below 900px; nothing overflows.
+
 ## Install
 
 ```
