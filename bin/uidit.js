@@ -49,7 +49,7 @@ const commands = {
     console.log(`\n  ${c.accent('uidit')} ${c.dim(`dashboard → ${url}`)}`);
     console.log(`  ${c.dim(`session   → ${path.join(store.uiditDir(cwd), 'session.json')}`)}`);
 
-    const targets = await discoverTargets();
+    const targets = await discoverTargets({ excludePorts: [port] });
     if (targets.length) {
       console.log(`\n  ${c.bold('Local servers found')} ${c.dim('— pick one with Discover, or paste a URL')}`);
       for (const t of targets) console.log(`    ${c.accent(t.url)}${t.title ? c.dim(` — ${t.title}`) : ''}`);

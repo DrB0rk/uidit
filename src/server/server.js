@@ -184,7 +184,7 @@ async function proxyRequest(req, res, target) {
   req.pipe(upstream);
 }
 
-export function createServer({ cwd = process.cwd(), hub = createHub() } = {}) {
+export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717 } = {}) {
   const server = http.createServer(async (req, res) => {
     // A browser aborting a request (navigation, closed tab) must not take down the
     // dashboard — without this, one ECONNRESET crashes the whole process.
@@ -223,7 +223,8 @@ export function createServer({ cwd = process.cwd(), hub = createHub() } = {}) {
           return json(res, 200, store.readSession(cwd));
         }
         if (route === '/api/discover') {
-          return json(res, 200, { targets: await discoverTargets() });
+          // Exclude our own port so uidit never offers itself as a review target.
+          return json(res, 200, { targets: await discoverTargets({ excludePorts: [port] }) });
         }
         if (route === '/api/config' && req.method === 'POST') {
           const body = await readBody(req);
@@ -302,7 +303,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub() } = {}) {
 export function startServer({ cwd = process.cwd(), port = 7717 } = {}) {
   const hub = createHub({ cwd });
   hub.watch();
-  const server = createServer({ cwd, hub });
+  const server = createServer({ cwd, hub, port });
 
   // Hot reload runs over a websocket; without this the preview renders but never
   // refreshes when the user saves a file.

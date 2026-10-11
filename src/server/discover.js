@@ -87,10 +87,11 @@ function fetchTarget(url, timeout = 800) {
  * The URL keeps whatever host form the user will paste (localhost, 127.0.0.1, [::1])
  * so the dashboard and the preview agree on how to reach the same server.
  */
-export async function discoverTargets({ extraPorts = [], includeNonHtml = false } = {}) {
+export async function discoverTargets({ extraPorts = [], excludePorts = [], includeNonHtml = false } = {}) {
   const listening = await listeningPorts();
+  const skip = new Set([...SELF_PORTS, ...excludePorts.map(String)]);
   const candidates = [...new Set([...listening, ...COMMON_PORTS, ...extraPorts.map(Number)])]
-    .filter((p) => p > 0 && p < 65536 && !SELF_PORTS.has(String(p)))
+    .filter((p) => p > 0 && p < 65536 && !skip.has(String(p)))
     .sort((a, b) => a - b);
 
   const open = await Promise.all(candidates.map((p) => probeEitherHost(p)));
