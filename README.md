@@ -41,7 +41,7 @@ other projects, pass a command explicitly with `uidit -- cargo run`, or configur
 `uidit --attach http://127.0.0.1:3000` to connect without owning that server, or
 `uidit --no-start` for manual discovery.
 
-![UIDIT workspace reviewing a demo app, with comments and the responsive preview toolbar](docs/screenshot.png)
+![UIDIT reviewing the fully styled Northstar Demo Shop checkout](docs/screenshots/storefront/overview.png)
 
 ## Screenshots
 
@@ -51,24 +51,53 @@ example includes product cards, delivery details, payment options, and working
 quantity and promo controls, so the review tools are demonstrated on a realistic,
 varied page rather than a bare HTML stub.
 
-<table>
-  <tr>
-    <td width="50%"><a href="docs/screenshots/feedback.png"><img src="docs/screenshots/feedback.png" alt="Feedback view with an annotated live page, comments, and team review controls"></a><br><strong>Feedback</strong> — comments, photo references, markers, and review links.</td>
-    <td width="50%"><a href="docs/screenshots/design.png"><img src="docs/screenshots/design.png" alt="Design studio with responsive viewport controls and component state previews"></a><br><strong>Design studio</strong> — responsive previews, temporary component states, and visual controls.</td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/elements.png"><img src="docs/screenshots/elements.png" alt="Elements view for inspected page components"></a><br><strong>Elements</strong> — inspected elements and page context.</td>
-    <td><a href="docs/screenshots/changes.png"><img src="docs/screenshots/changes.png" alt="Changes view showing reversible style edits"></a><br><strong>Changes</strong> — preview edits with before and after values.</td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/flows.png"><img src="docs/screenshots/flows.png" alt="Interaction flows with recorded steps and screenshots"></a><br><strong>Flows</strong> — recorded steps, screenshots, and replay controls.</td>
-    <td><a href="docs/screenshots/server.png"><img src="docs/screenshots/server.png" alt="Server view with process and workspace service controls"></a><br><strong>Server</strong> — development process, service, and HMR status.</td>
-  </tr>
-  <tr>
-    <td><a href="docs/screenshots/agents.png"><img src="docs/screenshots/agents.png" alt="Agents view with MCP connection and project context"></a><br><strong>Agents</strong> — MCP, task evidence, source context, and permissions.</td>
-    <td><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Settings view with theme, floating control, and keyboard preferences"></a><br><strong>Settings</strong> — control placement, appearance, and shortcuts.</td>
-  </tr>
-</table>
+### Feedback
+
+Comments, photo references, page markers, and review links on the styled checkout.
+
+![Feedback view with the Northstar checkout, annotated comments, and review controls](docs/screenshots/storefront/feedback.png)
+
+### Design studio
+
+Responsive viewports, temporary component states, and visual controls.
+
+![Design studio with the Northstar checkout and responsive preview controls](docs/screenshots/storefront/design.png)
+
+### Elements
+
+Inspected elements and useful page context.
+
+![Elements view inspecting the Northstar checkout](docs/screenshots/storefront/elements.png)
+
+### Changes
+
+Preview edits with before and after values.
+
+![Changes view showing reversible edits to the Northstar checkout](docs/screenshots/storefront/changes.png)
+
+### Flows
+
+Recorded steps, screenshots, and replay controls.
+
+![Flows view showing a recorded checkout flow](docs/screenshots/storefront/flows.png)
+
+### Server
+
+Development process, service, and HMR status.
+
+![Server view alongside the Northstar checkout](docs/screenshots/storefront/server.png)
+
+### Agents
+
+MCP, task evidence, source context, and permissions.
+
+![Agents view with project context and MCP settings](docs/screenshots/storefront/agents.png)
+
+### Settings
+
+Control placement, appearance, and keyboard preferences.
+
+![Settings view with theme and floating control preferences](docs/screenshots/storefront/settings.png)
 
 ## What you get
 
