@@ -46,7 +46,10 @@ other projects, pass a command explicitly with `uidit -- cargo run`, or configur
 ## Screenshots
 
 The screenshots below come from the browser end-to-end suite and show the current
-workspace running against a fixture app.
+workspace running against a self-contained, responsive Demo Shop checkout. The
+example includes product cards, delivery details, payment options, and working
+quantity and promo controls, so the review tools are demonstrated on a realistic,
+varied page rather than a bare HTML stub.
 
 <table>
   <tr>

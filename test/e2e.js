@@ -297,7 +297,10 @@ try {
   await client.close();
 
   // Page context offers page-only actions and stores a page-level note.
-  await frame.evaluate(() => document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 700, clientY: 700 })));
+  await frame.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight - innerHeight);
+    document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1000, clientY: 700 }));
+  });
   assert.match(await frame.locator('#uidit-context-menu').innerText(), /Add page note/);
   assert.doesNotMatch(await frame.locator('#uidit-context-menu').innerText(), /Inspect this element/);
   await frame.locator('[data-context-action="comment"]').click();
