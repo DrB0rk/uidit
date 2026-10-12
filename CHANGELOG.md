@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — 2026-10-12
+
+- Refreshed the README example UI and added a screenshot gallery for every workspace section.
+- Updated the documented feature, collaboration security, service workspace, and test-suite details for 0.7.0.
+
 ## 0.7.0 — 2026-10-11
 
 - Added project-scoped multi-service management with dependency-aware start/stop, separate logs, isolated process ownership, and preview switching.

@@ -7,6 +7,8 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.7.1">Latest release: v0.7.1</a> · Node.js 22+</p>
+
 ---
 
 ## The problem
@@ -39,9 +41,38 @@ other projects, pass a command explicitly with `uidit -- cargo run`, or configur
 `uidit --attach http://127.0.0.1:3000` to connect without owning that server, or
 `uidit --no-start` for manual discovery.
 
-![uidit reviewing a running app](docs/screenshot.png)
+![UIDIT workspace reviewing a demo app, with comments and the responsive preview toolbar](docs/screenshot.png)
+
+## Screenshots
+
+The screenshots below come from the browser end-to-end suite and show the current
+workspace running against a fixture app.
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/feedback.png"><img src="docs/screenshots/feedback.png" alt="Feedback view with an annotated live page, comments, and team review controls"></a><br><strong>Feedback</strong> — comments, photo references, markers, and review links.</td>
+    <td width="50%"><a href="docs/screenshots/design.png"><img src="docs/screenshots/design.png" alt="Design studio with responsive viewport controls and component state previews"></a><br><strong>Design studio</strong> — responsive previews, temporary component states, and visual controls.</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/elements.png"><img src="docs/screenshots/elements.png" alt="Elements view for inspected page components"></a><br><strong>Elements</strong> — inspected elements and page context.</td>
+    <td><a href="docs/screenshots/changes.png"><img src="docs/screenshots/changes.png" alt="Changes view showing reversible style edits"></a><br><strong>Changes</strong> — preview edits with before and after values.</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/flows.png"><img src="docs/screenshots/flows.png" alt="Interaction flows with recorded steps and screenshots"></a><br><strong>Flows</strong> — recorded steps, screenshots, and replay controls.</td>
+    <td><a href="docs/screenshots/server.png"><img src="docs/screenshots/server.png" alt="Server view with process and workspace service controls"></a><br><strong>Server</strong> — development process, service, and HMR status.</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/agents.png"><img src="docs/screenshots/agents.png" alt="Agents view with MCP connection and project context"></a><br><strong>Agents</strong> — MCP, task evidence, source context, and permissions.</td>
+    <td><a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" alt="Settings view with theme, floating control, and keyboard preferences"></a><br><strong>Settings</strong> — control placement, appearance, and shortcuts.</td>
+  </tr>
+</table>
 
 ## What you get
+
+UIDIT keeps the review surface close to the page and the implementation details
+in compact workspace sections. The default flow is: inspect or comment on the
+page, hand structured feedback to an agent, preview the proposed changes, then
+record implementation and verification evidence.
 
 **Discover** enumerates every port actually listening, probes IPv4 and IPv6
 loopback, and lists what answers with HTML. Any port works. uidit never picks a
@@ -151,6 +182,15 @@ Each process has separate logs and ownership. Start them in the Server panel and
 use **Preview** to switch the live view between ready local services. UIDIT only
 stops processes it started, and service working directories cannot escape the
 project root.
+
+### Scope and guarantees
+
+- Element-to-source matches are suggestions based on observed page context; confirm them in source.
+- HMR checks report whether linked page anchors remain present. They do not run project tests or approve visual correctness.
+- Responsive panes resize the browser viewport; they do not emulate device hardware or native browser behavior.
+- Baseline and candidate screenshots are review evidence shown side by side, not an automatic pixel-diff verdict.
+- Git context is read-only. UIDIT does not create commits, push branches, update pull requests, or merge changes.
+- Remote reviewers are comment-only. They cannot reach the local MCP endpoint, filesystem, or managed-service controls.
 
 ### Cloudflare relay setup
 
@@ -305,11 +345,11 @@ The UI is an [Astro](https://astro.build) app. All data arrives at runtime over
 
 ## Accessibility
 
-The dashboard is built to WCAG 2.2 AA and checked against a real browser, not
-assumed: every control has an accessible name, a 2px `:focus-visible` ring, and a
-pointer target of at least 24px. Status is always paired with an icon and a label,
-so colour is never the only signal. Tokens are `oklch()` throughout, and motion
-respects `prefers-reduced-motion`.
+The dashboard is checked in a real browser: controls have accessible names, a 2px
+`:focus-visible` ring, and pointer targets of at least 24px. Status pairs an icon
+with a label so colour is not the only signal. Motion respects
+`prefers-reduced-motion`. The audit panel reports measured checks separately from
+manual review candidates; this does not claim full WCAG conformance.
 
 ## Development
 
@@ -333,10 +373,13 @@ This exercises the local dev-server preview path, including root-relative assets
 route forwarding, the review overlay, and Vite's WebSocket HMR connection. It does
 not claim production deployment or framework-specific server adapter coverage.
 
-`npm test` runs 21 unit and proxy tests, a browser suite that drives the real
-dashboard against a fixture dev server, and a cross-stack check that renders two
-differently shaped servers — one IPv6-only with chunked HTML, one with a redirect,
-a hashed bundle and its own API.
+`npm test` runs 37 unit, proxy, and CLI tests; a browser suite that drives the
+dashboard against a fixture dev server; an authenticated Cloudflare Durable
+Object relay integration test; and six real-server compatibility checks. The
+browser suite covers the review workspace, comments and attachments, drawing,
+responsive previews, edits, state fixtures, flows, service switching, and
+preferences. The compatibility matrix covers IPv6-only Node HTTP, Vite, React,
+Vue, Svelte, and Astro.
 
 ## License
 
