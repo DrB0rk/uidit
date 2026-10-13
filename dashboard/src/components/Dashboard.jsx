@@ -41,7 +41,6 @@ export default function Dashboard() {
   const [reloadKey, setReloadKey] = useState(0);
   const [replayState, setReplayState] = useState(null);
   const [device, setDevice] = useState(() => { try { return ['desktop', 'tablet', 'phone'].includes(localStorage.getItem('uidit-device')) ? localStorage.getItem('uidit-device') : 'desktop'; } catch { return 'desktop'; } });
-  const [viewportLayout, setViewportLayout] = useState(1);
   const [customViewport, setCustomViewport] = useState({ width: 390, height: 844 });
   const [reference, setReference] = useState(null);
   const [compareMode, setCompareMode] = useState('overlay');
@@ -306,22 +305,16 @@ export default function Dashboard() {
 
   return <main ref={mainRef} className={`immersive${workspaceOpen ? ' workspace-open' : ''}${resizingDrawer ? ' resizing' : ''}`}>
     {targetUrl ? <>
-      <div className={`preview-device-stage device-${device}${viewportLayout > 1 ? ' multi-viewport' : ''}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100, '--custom-width': `${customViewport.width}px`, '--custom-height': `${customViewport.height}px` }}>
-        {Array.from({ length: viewportLayout }, (_, index) => {
-          const viewportDevice = viewportLayout === 1 ? device : ['phone', 'tablet', 'desktop'][index];
-          return <div className={`preview-live-frame device-${viewportDevice}`} key={index}>
-            {viewportLayout > 1 && <span className="viewport-label">{viewportDevice === 'phone' ? 'Phone · 390 × 844' : viewportDevice === 'tablet' ? 'Tablet · 768 × 1024' : 'Desktop · 1280 × 800'}</span>}
-            <iframe key={reloadKey} ref={index === 0 ? frameRef : undefined} className="immersive-preview" title={`${viewportDevice} live application preview`} src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={index === 0 ? syncOverlay : undefined} />
-            {index === 0 && reference && compareMode === 'overlay' && <img className="preview-reference-overlay" src={reference.dataUrl} alt="Reference design overlay" />}
-          </div>;
-        })}
-        {reference && compareMode === 'side' && viewportLayout === 1 && <div className="preview-reference-side"><span>Reference</span><img src={reference.dataUrl} alt={`Reference: ${reference.name}`} /></div>}
+      <div className={`preview-device-stage device-${device}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100, '--custom-width': `${customViewport.width}px`, '--custom-height': `${customViewport.height}px` }}>
+        <div className={`preview-live-frame device-${device}`}>
+          <iframe key={reloadKey} ref={frameRef} className="immersive-preview" title={`${device} live application preview`} src={`${config?.previewUrl}/proxy/?r=${reloadKey}`} onLoad={syncOverlay} />
+          {reference && compareMode === 'overlay' && <img className="preview-reference-overlay" src={reference.dataUrl} alt="Reference design overlay" />}
+        </div>
+        {reference && compareMode === 'side' && <div className="preview-reference-side"><span>Reference</span><img src={reference.dataUrl} alt={`Reference: ${reference.name}`} /></div>}
       </div>
       {workspaceOpen && <div className="device-toolbar" role="group" aria-label="Preview device size">
-        {[['desktop', 'Desktop', Laptop], ['tablet', 'Tablet', Tablet], ['phone', 'Phone', Smartphone]].map(([key, label, Icon]) => <button type="button" key={key} aria-pressed={device === key} className={device === key ? 'active' : ''} onClick={() => { setDevice(key); setViewportLayout(1); }}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}
-        <span className="toolbar-separator" />
-        {[1, 2, 3].map((count) => <button type="button" key={count} aria-pressed={viewportLayout === count} className={viewportLayout === count ? 'active' : ''} onClick={() => setViewportLayout(count)}>{count} view{count > 1 ? 's' : ''}</button>)}
-        <label className="custom-viewport">Custom <input aria-label="Custom viewport width" type="number" min="240" max="2560" value={customViewport.width} onChange={(event) => setCustomViewport((value) => ({ ...value, width: Math.max(240, Math.min(2560, Number(event.target.value) || 240)) }))} /> × <input aria-label="Custom viewport height" type="number" min="320" max="1800" value={customViewport.height} onChange={(event) => setCustomViewport((value) => ({ ...value, height: Math.max(320, Math.min(1800, Number(event.target.value) || 320)) }))} /><button type="button" className="btn sm" onClick={() => { setDevice('custom'); setViewportLayout(1); }}>Apply</button></label>
+        {[['desktop', 'Desktop', Laptop], ['tablet', 'Tablet', Tablet], ['phone', 'Phone', Smartphone]].map(([key, label, Icon]) => <button type="button" key={key} aria-pressed={device === key} className={device === key ? 'active' : ''} onClick={() => setDevice(key)}><Icon size={15} aria-hidden="true" /><span>{label}</span></button>)}
+        <label className="custom-viewport">Custom <input aria-label="Custom viewport width" type="number" min="240" max="2560" value={customViewport.width} onChange={(event) => setCustomViewport((value) => ({ ...value, width: Math.max(240, Math.min(2560, Number(event.target.value) || 240)) }))} /> × <input aria-label="Custom viewport height" type="number" min="320" max="1800" value={customViewport.height} onChange={(event) => setCustomViewport((value) => ({ ...value, height: Math.max(320, Math.min(1800, Number(event.target.value) || 320)) }))} /><button type="button" className="btn sm" onClick={() => setDevice('custom')}>Apply</button></label>
       </div>}
     </> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
     {workspaceOpen && <section className={`workspace-drawer${drawerWidth < 400 ? ' compact' : ''}`} id="uidit-workspace" aria-label="UIDIT review workspace">

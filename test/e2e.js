@@ -73,12 +73,8 @@ try {
   const tabletHeight = await frame.evaluate(() => innerHeight);
   assert.ok(tabletHeight >= 1000 && tabletHeight <= 1040, `tablet preview height: ${tabletHeight}`);
   await page.getByRole('button', { name: 'Desktop' }).click();
-  await page.getByRole('button', { name: '2 views' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.preview-live-frame iframe').length === 2);
-  assert.equal(await page.locator('.viewport-label').count(), 2, 'two-pane view labels each resized preview');
-  await page.getByRole('button', { name: '3 views' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.preview-live-frame iframe').length === 3);
-  await page.getByRole('button', { name: '1 view' }).click();
+  assert.equal(await page.locator('.preview-live-frame iframe').count(), 1, 'the preview is a single view');
+  assert.equal(await page.getByRole('button', { name: '2 views' }).count(), 0, 'the view-count controls are gone');
   await page.getByLabel('Custom viewport width').fill('360');
   await page.getByLabel('Custom viewport height').fill('740');
   await page.getByRole('button', { name: 'Apply', exact: true }).click();

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.4 — 2026-10-13
+
+- Removed the 1 / 2 / 3 view selector: the preview is a single live frame again, and the device toolbar keeps Desktop, Tablet, Phone and Custom sizes.
+- Dropped the multi-pane layout, its per-pane labels and the viewport-layout state from the dashboard and its stylesheet, and the browser suite now asserts one preview instead of two and three panes.
+
 ## 0.8.3 — 2026-10-13
 
 - The review panel is resizable: drag its left edge, or focus that edge and use ArrowLeft/ArrowRight (Home and End jump to the limits). It stays between 320px and 760px, keeps at least 360px of preview on smaller windows, and remembers the width per browser.
