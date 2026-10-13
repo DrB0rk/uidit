@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2 — 2026-10-13
+
+- The in-page button now follows the pointer while you drag it, and stays exactly where you drop it. The old model moved nothing until release and then snapped to one of nine viewport cells, which could park the button (and the panel under it) somewhere you did not ask for.
+- The panel opens in the room beside the button, narrowing and switching sides where the preview is tight, so it always lands fully inside the viewport instead of being clipped at the bottom or forcing a scrollbar.
+- The button is no longer clipped by its own frame while idle, and the floating rows no longer inherit a link underline.
+
 ## 0.8.1 — 2026-10-13
 
 - Simplified the in-page quick actions: one-line rows instead of label-plus-hint pairs, a compact icon strip for the four drawing tools, and the live server state in the header instead of a subtitle. The menu is 358px tall where it used to be capped at 585px and scroll.

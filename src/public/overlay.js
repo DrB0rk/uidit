@@ -31,19 +31,58 @@
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
   const controls = document.createElement('iframe');
-  const anchorKey = 'uidit-floating-anchor';
-  let savedAnchor = null;
+  // The button is placed wherever the reviewer drags it, in viewport pixels. The
+  // frame around it is sized and offset from that point, so the button keeps its
+  // place when the panel opens or the window resizes.
+  const positionKey = 'uidit-floating-position';
+  const BUTTON = 48;
+  const PANEL_MIN = 430; // button + gap + a panel tall enough to be worth opening
+  let floating = null;
+  let positionPinned = false;
   try {
-    const value = sessionStorage.getItem(anchorKey);
-    if (/^(left|center|right)-(top|middle|bottom)$/.test(value || '')) savedAnchor = value;
+    const [x, y] = String(sessionStorage.getItem(positionKey) || '').split(',').map(Number);
+    if (Number.isFinite(x) && Number.isFinite(y)) { floating = { x, y }; positionPinned = true; }
   } catch {}
-  function setAnchor(value) {
-    if (!/^(left|center|right)-(top|middle|bottom)$/.test(value || '')) return;
-    const [x, y] = value.split('-');
-    controls.classList.remove('uidit-left', 'uidit-center', 'uidit-right', 'uidit-top', 'uidit-middle');
-    controls.classList.add(`uidit-${x}`);
-    if (y !== 'bottom') controls.classList.add(`uidit-${y}`);
-    controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'placement', y }, controlOrigin);
+
+  function clampFloating(x, y) {
+    return {
+      x: Math.max(8, Math.min(x, Math.max(8, innerWidth - BUTTON - 8))),
+      y: Math.max(8, Math.min(y, Math.max(8, innerHeight - BUTTON - 8))),
+    };
+  }
+
+  function place() {
+    if (!floating) return;
+    const open = controls.classList.contains('uidit-open');
+    // The frame takes the room beside the button (up to 320px) rather than moving
+    // the button, so a narrow preview narrows the panel instead of shifting it.
+    const roomRight = innerWidth - 8 - (floating.x - 6);
+    const roomLeft = floating.x + 54 - 8;
+    const growLeft = roomLeft > roomRight;
+    const width = open ? Math.min(320, Math.max(180, growLeft ? roomLeft : roomRight)) : 62;
+    const left = growLeft ? floating.x + 54 - width : floating.x - 6;
+    const belowRoom = innerHeight - (floating.y - 6) - 8;
+    const aboveRoom = floating.y + 54 - 8;
+    const below = belowRoom >= PANEL_MIN || belowRoom >= aboveRoom;
+    const height = open ? Math.max(70, Math.min(660, below ? belowRoom : aboveRoom)) : 62;
+    const top = below ? floating.y - 6 : floating.y + 54 - height;
+    controls.style.left = `${Math.round(Math.max(0, Math.min(left, innerWidth - width)))}px`;
+    controls.style.top = `${Math.round(Math.max(0, Math.min(top, innerHeight - height)))}px`;
+    controls.style.bottom = 'auto';
+    controls.style.height = open ? `${Math.round(height)}px` : '';
+    if (open) controls.style.width = `${Math.round(width)}px`;
+    else controls.style.width = '';
+    controls.classList.toggle('uidit-grow-left', growLeft);
+    controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'placement', y: below ? 'below' : 'above', x: growLeft ? 'left' : 'right' }, controlOrigin);
+  }
+
+  function setFloating(x, y, persist = true) {
+    floating = clampFloating(x, y);
+    if (persist) {
+      positionPinned = true;
+      try { sessionStorage.setItem(positionKey, `${Math.round(floating.x)},${Math.round(floating.y)}`); } catch {}
+    }
+    place();
   }
   const bootstrap = document.currentScript;
   const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:7718';
@@ -62,7 +101,9 @@
   controls.title = 'UIDIT review controls';
   controls.setAttribute('data-uidit-ui', '1');
   (document.documentElement || document).append(controls);
-  if (savedAnchor) setAnchor(savedAnchor);
+  if (!floating) floating = clampFloating(24, innerHeight - BUTTON - 24);
+  place();
+  window.addEventListener('resize', () => { floating = clampFloating(floating.x, floating.y); place(); });
 
   const post = (type, payload = {}) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, parentOrigin);
 
@@ -639,17 +680,13 @@
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
     if (ev.source === controls.contentWindow && ev.origin === controlOrigin && msg?.source === 'uidit-control') {
-      if (msg.type === 'resize') controls.classList.toggle('uidit-open', msg.open === true);
-      if (msg.type === 'action' && msg.action === 'move' && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
-        const rect = controls.getBoundingClientRect();
-        const x = Math.max(0, Math.min(innerWidth, rect.left + msg.x));
-        const y = Math.max(0, Math.min(innerHeight, rect.top + msg.y));
-        const column = x < innerWidth / 3 ? 'left' : x < innerWidth * 2 / 3 ? 'center' : 'right';
-        const row = y < innerHeight / 3 ? 'top' : y < innerHeight * 2 / 3 ? 'middle' : 'bottom';
-        savedAnchor = `${column}-${row}`;
-        try { sessionStorage.setItem(anchorKey, savedAnchor); } catch {}
-        setAnchor(savedAnchor);
+      if (msg.type === 'resize') { controls.classList.toggle('uidit-open', msg.open === true); place(); }
+      // The control frame carries the button; moving it by the pointer's own deltas
+      // keeps the button under the pointer without a position round trip per event.
+      if (msg.type === 'action' && msg.action === 'dragMove' && (Number.isFinite(msg.dx) || Number.isFinite(msg.dy))) {
+        setFloating(floating.x + (Number(msg.dx) || 0), floating.y + (Number(msg.dy) || 0), false);
       }
+      if (msg.type === 'action' && msg.action === 'dragCommit') setFloating(floating.x, floating.y);
       if (msg.type === 'action' && msg.action === 'inspect' && typeof msg.enabled === 'boolean') post('control', { action: 'inspect', enabled: msg.enabled });
       if (msg.type === 'action' && msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) post('control', { action: 'draw', tool: msg.tool });
       if (msg.type === 'action' && msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) post('control', { action: 'comment', text: msg.text.trim(), page: realPage(), elementId: state.selected?.record.id ?? null });
@@ -701,7 +738,7 @@
     }
     if (msg.type === 'state') {
       setBrowserInspection(msg.browserInspection === true);
-      if (!savedAnchor) setAnchor(msg.position === 'bottom-right' ? 'right-bottom' : 'left-bottom');
+      if (!positionPinned) setFloating(msg.position === 'bottom-right' ? innerWidth - BUTTON - 24 : 24, innerHeight - BUTTON - 24, false);
       if (Array.isArray(msg.comments) && Array.isArray(msg.elements)) { visualState = { comments: msg.comments, elements: msg.elements }; renderVisuals(); }
       // Keep the bridge's trusted discriminator after spreading dashboard
       // state, which carries its own `source` field.

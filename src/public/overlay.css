@@ -9,19 +9,13 @@ iframe[data-uidit-ui] {
   background: transparent;
 }
 
+/* Positioned by overlay.js from the reviewer's dragged position: a small square
+   while idle so it covers no more of the page than the button itself, then
+   widened to hold the panel. */
 iframe[data-uidit-ui].uidit-open {
   width: 320px;
   height: min(660px, calc(100vh - 24px));
 }
-
-iframe[data-uidit-ui].uidit-left {
-  left: 16px;
-}
-
-iframe[data-uidit-ui].uidit-center { left: calc(50vw - 160px); }
-iframe[data-uidit-ui].uidit-right { left: calc(100vw - 336px); }
-iframe[data-uidit-ui].uidit-top { top: 16px; bottom: auto; }
-iframe[data-uidit-ui].uidit-middle { top: calc(50vh - 31px); bottom: auto; }
 
 .uidit-context-menu[hidden] { display: none; }
 .uidit-context-menu {
