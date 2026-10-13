@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 — 2026-10-13
+
+- The desktop preview now fills the review area beside the drawer instead of a fixed 1280 × 800 box, so the app renders at the window's real CSS width and wide screens no longer show a small preview floating in a gray field. The rounded frame, shadow, and outline stay, and tablet, phone, and custom viewports keep their exact device sizes.
+- Added an Oh My Pi plugin surface to the package: `omp/extension.js` registers the `uidit_feedback` tool and `/uidit` command, which read `.uidit/` review state without a running dashboard; `mcp.json` declares the local MCP bridge; and the bundled `skills/uidit` installs with the plugin. `omp plugin install /path/to/uidit` wires all three.
+- `uidit mcp stdio` now reports that no instance answered, instead of an empty Streamable HTTP error.
+
 ## 0.7.1 — 2026-10-12
 
 - Refreshed the README example UI and added a screenshot gallery for every workspace section.

@@ -159,7 +159,17 @@ const commands = {
       console.log(JSON.stringify({ url: `http://127.0.0.1:${port}/mcp`, transport: 'Streamable HTTP', token: readMcpToken(cwd), stdio: 'uidit mcp stdio (requires a running uidit instance)' }, null, 2));
       return;
     }
-    if (sub === 'stdio') return runStdioBridge({ cwd });
+    if (sub === 'stdio') {
+      try {
+        return await runStdioBridge({ cwd });
+      } catch (error) {
+        const port = store.readConfig(cwd)?.controlPort ?? 7718;
+        console.error(`${c.bold('uidit mcp stdio')} could not reach http://127.0.0.1:${port}/mcp${error?.message ? ` (${error.message})` : ''}`);
+        console.error(`  ${c.dim('Start `uidit` in this project, then let your MCP client reconnect.')}`);
+        process.exitCode = 1;
+        return;
+      }
+    }
     throw new Error(`unknown mcp command: ${sub}`);
   },
 

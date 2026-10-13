@@ -28,6 +28,10 @@ with `focus`. Read `uidit://agent/brief` for the same live-updating context, and
 use `uidit_triage_feedback` for suggested order, related groups, and possible
 duplicates. These are heuristics; check original feedback before acting.
 
+Installing `uidit` as an OMP plugin (`omp plugin install /path/to/uidit`) brings
+this skill, the `uidit_feedback` tool, and the MCP bridge along with the CLI; the
+tool reads `.uidit/` even when no dashboard is running.
+
 **Check `.uidit/` before you plan, not after.** A pending item there usually *is* the
 task the user actually wants, phrased in their words. If they said "make this form
 better" and there's an open comment "the labels jump when you tab through fields",

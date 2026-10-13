@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.7.1">Latest release: v0.7.1</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.8.0">Latest release: v0.8.0</a> · Node.js 22+</p>
 
 ---
 
@@ -322,8 +322,29 @@ threads when intent is unclear, report completed work in the thread, and resolve
 feedback only after implementing and verifying it. Brief resource updates are
 sent when the review session, selection, configuration, or dev process changes.
 
-An `uidit` skill for agents is bundled in [`skills/uidit/`](skills/uidit/) —
-copy it to `~/.omp/agent/skills/uidit` if your agent reads skills from there.
+### Oh My Pi plugin
+
+`uidit` is also an OMP extension package, so one install gives an OMP session the
+skill, a tool, and the MCP server:
+
+```sh
+omp plugin install /path/to/uidit   # a local checkout; `omp plugin link` does the same
+```
+
+The package ships the same three surfaces by hand if you would rather wire them
+yourself:
+
+- [`skills/uidit/`](skills/uidit/) — the review workflow skill (copy it to
+  `~/.omp/agent/skills/uidit`, or any agent's skill directory).
+- [`omp/extension.js`](omp/extension.js) — the `uidit_feedback` tool and `/uidit`
+  command. They read `.uidit/session.json` directly, so they work with no
+  dashboard running, and summarize open comments, pending preview edits, and open
+  tasks.
+- [`mcp.json`](mcp.json) — declares the `uidit mcp stdio` bridge, which connects
+  only while `uidit` runs in the project's directory.
+
+A user-level `uidit` entry in `~/.omp/agent/mcp.json` takes precedence over the
+plugin's copy, and both point at the same local server.
 
 ## Commands
 

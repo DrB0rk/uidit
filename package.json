@@ -1,6 +1,6 @@
 {
   "name": "uidit",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Local UI review dashboard: tag elements, comment, and make simple edits directly on a running dev server. Everything persists to .uidit for coding agents to read.",
   "type": "module",
   "bin": {
@@ -12,6 +12,9 @@
   "files": [
     "bin",
     "src",
+    "omp",
+    "skills",
+    "mcp.json",
     "cloudflare",
     "dashboard/dist",
     "dashboard/src",
@@ -20,6 +23,11 @@
     "README.md",
     "LICENSE"
   ],
+  "omp": {
+    "extensions": [
+      "./omp/extension.js"
+    ]
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/DrB0rk/uidit.git"
