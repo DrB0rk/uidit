@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 — 2026-10-13
+
+- Simplified the in-page quick actions: one-line rows instead of label-plus-hint pairs, a compact icon strip for the four drawing tools, and the live server state in the header instead of a subtitle. The menu is 358px tall where it used to be capped at 585px and scroll.
+- Replaced the popup's 68px-blur shadow with a tight 12px one and reserved room for it on the leading edge. The floating control iframe clips anything wider than its own box, so the old shadow was cut off into a visible dark band around the menu.
+
 ## 0.8.0 — 2026-10-13
 
 - The desktop preview now fills the review area beside the drawer instead of a fixed 1280 × 800 box, so the app renders at the window's real CSS width and wide screens no longer show a small preview floating in a gray field. The rounded frame, shadow, and outline stay, and tablet, phone, and custom viewports keep their exact device sizes.
