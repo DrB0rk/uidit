@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.8.4">Latest release: v0.8.4</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.9.0">Latest release: v0.9.0</a> · Node.js 22+</p>
 
 ---
 

@@ -4,12 +4,10 @@ import Sidebar from './Sidebar.jsx';
 import { AgentsPanel, ServerPanel, SettingsPanel } from './RuntimePanels.jsx';
 import { DesignPanel } from './DesignPanel.jsx';
 import { useSession } from '../state/useSession.js';
-import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles, Ellipsis } from 'lucide-react';
+import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles } from 'lucide-react';
 import { FlowsPanel } from './RuntimePanels.jsx';
 
 const TABS = [['feedback', 'Feedback', MessageSquareText], ['design', 'Design', WandSparkles], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['flows', 'Flows', Workflow], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
-const PRIMARY_TABS = TABS.slice(0, 4);
-const MORE_TABS = TABS.slice(4);
 const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
 // The review panel resizes by dragging its edge; the preview keeps the rest of the width.
 const DRAWER_KEY = 'uidit-drawer-width';
@@ -334,19 +332,18 @@ export default function Dashboard() {
         onPointerCancel={endDrawerResize}
         onKeyDown={nudgeDrawer}
       />
-      <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><details className="workspace-more"><summary className={MORE_TABS.some(([id]) => tab === id) ? 'active' : ''} aria-label="More workspace sections" title="More workspace sections"><Ellipsis size={17} aria-hidden="true"/><span>More</span></summary><div className="workspace-more-menu">{MORE_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={(event) => { setTab(id); event.currentTarget.closest('details').open = false; }}><Icon size={15} aria-hidden="true"/><span>{label}</span></button>)}</div></details><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
-      {targetUrl && <Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
-      <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
-      <nav className="workspace-tabs" aria-label="Review workspace sections">{PRIMARY_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
+      <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
+      {targetUrl && <Toolbar compact config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
+      <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
         {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
         {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
         {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
-        {tab === 'server' && <ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} />}
+        {tab === 'server' && <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}
         {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
         {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
       </div>
-      <footer className="workspace-foot"><span className="status-dot online" /> Local · {live}</footer>
+      <footer className="workspace-foot"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><span className="spacer" /><span>{live}</span></footer>
     </section>}
     <div className={`toast ${workspaceOpen ? 'visible' : ''}`} role="status" aria-live="polite"><span className="dot"/><span>{status.text}</span></div>
   </main>;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 — 2026-10-13
+
+- Every workspace section is visible at once: Feedback, Design, Elements, Changes, Flows, Server, Agents and Settings sit in one grid, each one click away. The "More" dropdown that hid half of them is gone.
+- The panel no longer pins a full connection bar above every section. While reviewing it keeps a short strip (Reload, Inspect, Text, JSON); the target field, Connect and Discover moved into the Server section, next to the dev process and services they belong with.
+- The duplicated server-state line folded into the footer, which now carries the server state on the left and the session state on the right. Panel chrome drops from 306px to 250px, giving section content about 94px more height, and the browser suite asserts that all eight sections are reachable without a menu.
+
 ## 0.8.4 — 2026-10-13
 
 - Removed the 1 / 2 / 3 view selector: the preview is a single live frame again, and the device toolbar keeps Desktop, Tablet, Phone and Custom sizes.

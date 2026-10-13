@@ -317,9 +317,7 @@ try {
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.drawing?.type === 'arrow'));
 
   // Record a real preview action with a screenshot, stop, then replay it.
-  const moreMenu = page.locator('.workspace-head-actions .workspace-more');
-  await moreMenu.locator('summary').click();
-  await moreMenu.getByRole('button', { name: /^Flows/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Flows/ }).click();
   await page.locator('#uidit-flow-name').fill('Checkout button smoke flow');
   await page.getByRole('button', { name: 'Start recording' }).click();
   await page.waitForTimeout(150);
@@ -348,17 +346,14 @@ try {
   assert.match(exportedTest.suggestedFilename(), /Checkout-button-smoke-flow\.spec\.js/);
 
   // Each workspace section opens, and settings can be saved.
-  for (const label of ['Elements', 'Changes']) {
+  // Every section is one click away: the drawer's nav lists all of them.
+  assert.equal(await page.locator('.workspace-tabs button').count(), 8, 'every workspace section is visible without a menu');
+  assert.equal(await page.locator('.workspace-more').count(), 0, 'no section menu is left to hunt through');
+  for (const label of ['Elements', 'Changes', 'Server', 'Agents', 'Settings']) {
     await page.locator('.workspace-tabs').getByRole('button', { name: new RegExp(`^${label}`) }).click();
     await page.locator('.workspace-content').waitFor();
   }
-  for (const label of ['Server', 'Agents', 'Settings']) {
-    await moreMenu.locator('summary').click();
-    await moreMenu.getByRole('button', { name: new RegExp(`^${label}`) }).click();
-    await page.locator('.workspace-content').waitFor();
-  }
-  await moreMenu.locator('summary').click();
-  await moreMenu.getByRole('button', { name: /^Server/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Server/ }).click();
   await page.getByText('Configure services', { exact: true }).click();
   const managedServiceCommand = "const h=require('node:http');const s=h.createServer((q,r)=>r.end('service'));s.listen(0,'127.0.0.1',()=>console.log('http://127.0.0.1:'+s.address().port))";
   await page.getByLabel('Services JSON').fill(JSON.stringify([{ id: 'api', name: 'Test API', command: ['node', '-e', managedServiceCommand], cwd: '.', dependencies: [] }]));
@@ -377,8 +372,7 @@ try {
   for (let i = 0; i < 60 && !page.frames().some((item) => item.url().includes('/proxy/')); i++) await page.waitForTimeout(100);
   frame = page.frames().find((item) => item.url().includes('/proxy/'));
   assert.ok(frame, 'primary preview should reload after switching back from the service');
-  await moreMenu.locator('summary').click();
-  await moreMenu.getByRole('button', { name: /^Settings/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Settings/ }).click();
   await page.locator('#uidit-position').selectOption('bottom-right');
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).config.ui.position === 'bottom-right');
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();

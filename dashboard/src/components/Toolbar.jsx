@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Compass, MousePointer2, Type, FileJson, RefreshCw } from 'lucide-react';
 
-export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, onReload }) {
+export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, onReload, compact = false }) {
   const [url, setUrl] = useState(config?.targetUrl ?? '');
   const [targets, setTargets] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -35,6 +35,57 @@ export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, o
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  const reloadButton = config?.targetUrl ? (
+    <button className="btn ghost" onClick={onReload} title="Reload the preview">
+      <RefreshCw size={15} aria-hidden="true" />
+      Reload
+    </button>
+  ) : null;
+
+  const modes = (
+    <div className="modes" role="group" aria-label="Editing mode">
+      <button
+        className="btn"
+        aria-pressed={mode === 'inspect'}
+        onClick={() => onMode('inspect')}
+        title="Click any element to tag it (1)"
+      >
+        <MousePointer2 size={15} aria-hidden="true" />
+        Inspect
+      </button>
+      <button
+        className="btn"
+        aria-pressed={mode === 'text'}
+        onClick={() => onMode('text')}
+        title="Edit text in place (2)"
+      >
+        <Type size={15} aria-hidden="true" />
+        Text
+      </button>
+    </div>
+  );
+
+  const sessionLink = (
+    <a className="btn ghost" href="/api/session.json" target="_blank" rel="noreferrer" title="Open .uidit/session.json">
+      <FileJson size={15} aria-hidden="true" />
+      JSON
+    </a>
+  );
+
+  // The drawer shows the strip: reload and the editing modes, which are what you
+  // reach for mid-review. Connecting, discovering and switching targets live in
+  // the Server section, where the full bar is rendered.
+  if (compact) {
+    return (
+      <header className="bar compact">
+        <span className="spacer" />
+        {reloadButton}
+        {modes}
+        {sessionLink}
+      </header>
+    );
+  }
 
   return (
     <header className="bar">
@@ -96,38 +147,11 @@ export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, o
 
       <span className="spacer" />
 
-      {config?.targetUrl && (
-        <button className="btn ghost" onClick={onReload} title="Reload the preview">
-          <RefreshCw size={15} aria-hidden="true" />
-          Reload
-        </button>
-      )}
+      {reloadButton}
 
-      <div className="modes" role="group" aria-label="Editing mode">
-        <button
-          className="btn"
-          aria-pressed={mode === 'inspect'}
-          onClick={() => onMode('inspect')}
-          title="Click any element to tag it (1)"
-        >
-          <MousePointer2 size={15} aria-hidden="true" />
-          Inspect
-        </button>
-        <button
-          className="btn"
-          aria-pressed={mode === 'text'}
-          onClick={() => onMode('text')}
-          title="Edit text in place (2)"
-        >
-          <Type size={15} aria-hidden="true" />
-          Text
-        </button>
-      </div>
+      {modes}
 
-      <a className="btn ghost" href="/api/session.json" target="_blank" rel="noreferrer" title="Open .uidit/session.json">
-        <FileJson size={15} aria-hidden="true" />
-        JSON
-      </a>
+      {sessionLink}
     </header>
   );
 }
