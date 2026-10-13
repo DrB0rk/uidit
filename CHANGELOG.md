@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 — 2026-10-13
+
+- Keyboard shortcuts now work wherever focus is: the panel, the previewed page, and the floating control. `I`, `C`, `G`, `Escape` and `U` all reach the same actions from any of them, so reviewing the page no longer requires clicking back into the panel first.
+- `Escape` clears what is in front of it before closing the panel: a selection, drawing or open menu goes first, then the next press closes the panel. Inside a field it leaves the field, and letters typed into page or panel fields are never read as shortcuts.
+- The control's key hints match reality again (inspection is `I`, not `1`), and the browser suite now covers the shortcuts from the panel, the preview and the floating control.
+- Fixed the overlay measuring itself: page size came from `documentElement.scrollWidth`, which includes the overlay's own layers, so the visuals layer grew on every render and page notes and drawings were normalized against an inflated width. Overlay geometry and stored anchors now measure the app body.
+
 ## 0.9.0 — 2026-10-13
 
 - Every workspace section is visible at once: Feedback, Design, Elements, Changes, Flows, Server, Agents and Settings sit in one grid, each one click away. The "More" dropdown that hid half of them is gone.

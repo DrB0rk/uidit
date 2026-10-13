@@ -399,9 +399,16 @@
     return { status: 'recovered', element: ranked[0].element, candidates };
   }
   const visualPage = () => `${location.origin}${location.pathname}${location.search}`;
+  // The controls and this overlay's visuals hang off <html>, so a documentElement
+  // measurement would include them and grow with every render. Measure the app.
+  function pageSize() {
+    return {
+      width: Math.max(document.body?.scrollWidth ?? 0, innerWidth),
+      height: Math.max(document.body?.scrollHeight ?? 0, innerHeight),
+    };
+  }
   function renderVisuals() {
-    const width = Math.max(document.documentElement.scrollWidth, innerWidth);
-    const height = Math.max(document.documentElement.scrollHeight, innerHeight);
+    const { width, height } = pageSize();
     visuals.style.width = `${width}px`; visuals.style.height = `${height}px`; visuals.replaceChildren();
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('width', width); svg.setAttribute('height', height);
@@ -459,7 +466,7 @@
     document.documentElement.append(drawSvg);
     drawSvg.addEventListener('pointerdown',e=>{if(e.target.closest?.('[data-uidit-ui]'))return;drawStart={x:e.clientX,y:e.clientY};drawShape=document.createElementNS(svgNS,tool==='ellipse'?'ellipse':tool==='rectangle'?'rect':'path');drawShape.setAttribute('fill',tool==='freehand'||tool==='arrow'?'none':'rgba(120,91,255,.10)');drawShape.setAttribute('stroke','#785bff');drawShape.setAttribute('stroke-width','3');drawShape.setAttribute('stroke-linecap','round');drawShape.setAttribute('stroke-linejoin','round');if(tool==='arrow')drawShape.setAttribute('marker-end','url(#uidit-arrowhead)');drawSvg.append(drawShape);drawSvg.setPointerCapture(e.pointerId);e.preventDefault()});
     drawSvg.addEventListener('pointermove',e=>{if(!drawStart||!drawShape)return;const x=e.clientX,y=e.clientY;if(tool==='rectangle'){drawShape.setAttribute('x',Math.min(drawStart.x,x));drawShape.setAttribute('y',Math.min(drawStart.y,y));drawShape.setAttribute('width',Math.abs(x-drawStart.x));drawShape.setAttribute('height',Math.abs(y-drawStart.y))}else if(tool==='ellipse'){drawShape.setAttribute('cx',(drawStart.x+x)/2);drawShape.setAttribute('cy',(drawStart.y+y)/2);drawShape.setAttribute('rx',Math.abs(x-drawStart.x)/2);drawShape.setAttribute('ry',Math.abs(y-drawStart.y)/2)}else drawShape.setAttribute('d',`${drawShape.getAttribute('d')||`M${drawStart.x} ${drawStart.y}`} L${x} ${y}`);e.preventDefault()});
-    drawSvg.addEventListener('pointerup',async e=>{if(!drawStart||!drawShape)return;const start=drawStart;const end={x:e.clientX,y:e.clientY};drawStart=null;const pageWidth=Math.max(document.documentElement.scrollWidth,innerWidth),pageHeight=Math.max(document.documentElement.scrollHeight,innerHeight);const points=tool==='freehand'?parsePath(drawShape.getAttribute('d')).slice(0,500).map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight})):[start,end].map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight}));drawSvg.remove();drawSvg=null;document.documentElement.style.cursor='';drawingTool='off';try{await api('/comment','POST',{text:`${tool[0].toUpperCase()+tool.slice(1)} annotation for the coding agent`,elementId:null,page:realPage(),drawing:{type:tool,points,pageWidth,pageHeight}});post('drawn',{tool})}catch(err){post('error',{message:err.message})}});
+    drawSvg.addEventListener('pointerup',async e=>{if(!drawStart||!drawShape)return;const start=drawStart;const end={x:e.clientX,y:e.clientY};drawStart=null;const {width:pageWidth,height:pageHeight}=pageSize();const points=tool==='freehand'?parsePath(drawShape.getAttribute('d')).slice(0,500).map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight})):[start,end].map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight}));drawSvg.remove();drawSvg=null;document.documentElement.style.cursor='';drawingTool='off';try{await api('/comment','POST',{text:`${tool[0].toUpperCase()+tool.slice(1)} annotation for the coding agent`,elementId:null,page:realPage(),drawing:{type:tool,points,pageWidth,pageHeight}});post('drawn',{tool})}catch(err){post('error',{message:err.message})}});
   }
   function parsePath(d){return [...(d||'').matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map(m=>({x:Number(m[1]),y:Number(m[2])}));}
   addEventListener('resize',renderVisuals); addEventListener('scroll',()=>{ if (!document.activeElement?.closest?.('.uidit-comment-thread')) renderVisuals(); },true);
@@ -565,7 +572,7 @@
       if (action === 'post') {
         const text = contextMenu.querySelector('textarea')?.value.trim();
         if (!text) return;
-        const pageWidth=Math.max(document.documentElement.scrollWidth,innerWidth),pageHeight=Math.max(document.documentElement.scrollHeight,innerHeight);
+        const {width:pageWidth,height:pageHeight}=pageSize();
         const target=contextTarget&&contextTarget!==document.body&&contextTarget!==document.documentElement;
         const anchor=!target&&contextPoint?{x:Math.max(0,Math.min(1,(contextPoint.x+scrollX)/pageWidth)),y:Math.max(0,Math.min(1,(contextPoint.y+scrollY)/pageHeight))}:null;
         await api('/comment', 'POST', { elementId: contextElementId, page: realPage(), text, anchor });
@@ -669,12 +676,22 @@
   document.addEventListener('click', onClick, true);
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const typing = /INPUT|TEXTAREA|SELECT/.test(ev.target?.tagName ?? '') || ev.target?.isContentEditable === true;
+    const key = ev.key.toLowerCase();
+    if (key === 'escape') {
+      const hadLocalWork = !contextMenu.hidden || drawingTool !== 'off' || Boolean(state.selected);
       closeContextMenu();
       setDrawingTool('off');
       restoreSelected();
       post('selected', { element: null });
+      // With none of our own layers open, Escape belongs to the panel hosting the preview.
+      if (!hadLocalWork && !typing) post('shortcut', { key: 'escape' });
+      return;
     }
+    if (typing) return;
+    // The panel owns review state, so the preview reports these instead of acting on them.
+    if (key === 'i' || key === 'c' || key === 'g') post('shortcut', { key });
   });
 
   window.addEventListener('message', (ev) => {
@@ -687,6 +704,7 @@
         setFloating(floating.x + (Number(msg.dx) || 0), floating.y + (Number(msg.dy) || 0), false);
       }
       if (msg.type === 'action' && msg.action === 'dragCommit') setFloating(floating.x, floating.y);
+      if (msg.type === 'action' && msg.action === 'shortcut' && ['i', 'c', 'g', 'escape'].includes(msg.key)) post('shortcut', { key: msg.key });
       if (msg.type === 'action' && msg.action === 'inspect' && typeof msg.enabled === 'boolean') post('control', { action: 'inspect', enabled: msg.enabled });
       if (msg.type === 'action' && msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) post('control', { action: 'draw', tool: msg.tool });
       if (msg.type === 'action' && msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim().length <= 4000) post('control', { action: 'comment', text: msg.text.trim(), page: realPage(), elementId: state.selected?.record.id ?? null });
@@ -785,6 +803,7 @@
     if (msg.type === 'drawMode') { setDrawingTool(msg.tool); return; }
     if (msg.type === 'escape') { controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin); }
     if (msg.type === 'hideControls') { controls.hidden = true; return; }
+    if (msg.type === 'showControls') { controls.hidden = false; return; }
     handle(msg).catch((err) => post('error', { message: err.message }));
   });
 

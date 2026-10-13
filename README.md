@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.9.0">Latest release: v0.9.0</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.9.1">Latest release: v0.9.1</a> · Node.js 22+</p>
 
 ---
 
@@ -365,7 +365,11 @@ plugin's copy, and both point at the same local server.
 | `uidit build` | rebuild the dashboard UI |
 
 Keyboard: `I` toggles inspection, `C` opens Feedback, `G` opens the workspace,
-`Escape` closes the current panel, and `U` restores hidden in-page controls.
+`Escape` closes the current panel, and `U` restores hidden in-page controls. These
+work from the panel, from the previewed page, and from the floating control. On the
+page, `Escape` clears a selection, drawing or menu first and closes the panel after
+that; inside a field it leaves the field, and letters typed there are never taken as
+shortcuts.
 
 ## How it works
 

@@ -119,6 +119,63 @@ try {
   const floatingAfter = await floatingFrame.boundingBox();
   assert.ok(Math.abs(floatingAfter.x - floatingBefore.x) > 50, 'dragging should move the floating control iframe');
 
+  // The documented shortcuts work wherever focus is: the panel, the preview page
+  // or the floating control. Escape clears the preview's own layers first.
+  const focusPreview = () => frame.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
+  const inspectPressed = () => page.locator('.bar.compact').getByRole('button', { name: 'Inspect', exact: true }).getAttribute('aria-pressed');
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'the workspace panel is open before the shortcut checks');
+  await page.keyboard.press('i');
+  await page.waitForTimeout(200);
+  assert.equal(await inspectPressed(), 'true', 'I toggles inspection from the panel');
+  await page.keyboard.press('i');
+  await page.waitForTimeout(150);
+  assert.equal(await inspectPressed(), 'false', 'I toggles inspection off from the panel');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'Escape closes the panel from the panel');
+  await focusPreview();
+  await page.keyboard.press('g');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'G opens the panel from the preview');
+  await page.keyboard.press('i');
+  await page.waitForTimeout(200);
+  assert.equal(await inspectPressed(), 'true', 'I toggles inspection from the preview');
+  await frame.locator('#pay').hover();
+  await page.waitForTimeout(200);
+  assert.ok(await frame.evaluate(() => document.querySelectorAll('[data-uidit-hover]').length) > 0, 'inspection from the preview highlights page elements');
+  await page.keyboard.press('i');
+  await page.waitForTimeout(150);
+  assert.equal(await inspectPressed(), 'false', 'I toggles inspection off from the preview');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'Escape closes the panel from the preview');
+  await floating.locator('.fab').focus();
+  await page.keyboard.press('Enter');
+  await floating.locator('.menu.open').waitFor();
+  await page.keyboard.press('g');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'G reaches the panel from the floating control');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  await floating.locator('.menu.open').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape closes the control menu before the panel');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'the next Escape closes the panel from the floating control');
+  await page.keyboard.press('g');
+  await page.waitForTimeout(250);
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Settings/ }).click();
+  await page.getByRole('button', { name: /Hide UIDIT controls/ }).click();
+  await page.waitForTimeout(250);
+  assert.equal(await frame.locator('iframe[data-uidit-ui]').evaluate((el) => el.hidden), true, 'settings hides the in-page controls');
+  await page.keyboard.press('u');
+  await page.waitForTimeout(250);
+  assert.equal(await frame.locator('iframe[data-uidit-ui]').evaluate((el) => el.hidden), false, 'U restores the hidden in-page controls');
+  await page.keyboard.press('g');
+  await page.waitForTimeout(250);
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();
+  await page.waitForTimeout(200);
+
   // Inspection tags an element; comment and quick style edit persist.
   await page.getByRole('button', { name: /Feedback/ }).click();
   await page.getByRole('button', { name: 'Inspect', exact: true }).click();

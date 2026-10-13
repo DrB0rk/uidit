@@ -93,6 +93,13 @@ export default function Dashboard() {
     setWorkspaceOpen(true);
   }, []);
 
+  const runShortcut = useCallback((key) => {
+    if (key === 'escape') { toOverlay({ type: 'escape' }); if (workspaceOpen) setWorkspaceOpen(false); else setMode('off'); return; }
+    if (key === 'i') { const next = mode === 'inspect' ? 'off' : 'inspect'; setMode(next); toOverlay({ type: 'mode', mode: next }); return; }
+    if (key === 'g' || key === 'c') { showWorkspace('feedback'); return; }
+    if (key === 'u') toOverlay({ type: 'showControls' });
+  }, [mode, showWorkspace, toOverlay, workspaceOpen]);
+
   const syncOverlay = useCallback(() => {
     toOverlay({ type: 'mode', mode });
     toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, browserInspection: config?.ui?.allowBrowserInspection === true, comments: session.comments, elements: session.elements, theme });
@@ -141,6 +148,8 @@ export default function Dashboard() {
       if (ev.source !== frameRef.current?.contentWindow || ev.origin !== previewOrigin) return;
       const msg = ev.data;
       if (!msg || msg.source !== 'uidit-overlay') return;
+      // Shortcuts pressed while the preview has focus arrive here through the overlay.
+      if (msg.type === 'shortcut' && typeof msg.key === 'string') { runShortcut(msg.key); return; }
       if (msg.type === 'record-step' && msg.step && typeof msg.flowId === 'string') {
         actions.addFlowStep(msg.flowId, msg.step).catch((error) => onStatus(error.message, 'error'));
         return;
@@ -244,15 +253,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     const onKey = (event) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(event.target?.tagName ?? '') || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key === 'Escape') { toOverlay({ type: 'escape' }); if (workspaceOpen) setWorkspaceOpen(false); else setMode('off'); }
-      if (event.key.toLowerCase() === 'g') showWorkspace('feedback');
-      if (event.key.toLowerCase() === 'i') { const next = mode === 'inspect' ? 'off' : 'inspect'; setMode(next); toOverlay({ type: 'mode', mode: next }); }
-      if (event.key.toLowerCase() === 'c') showWorkspace('feedback');
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const typing = /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName ?? '') || event.target?.isContentEditable === true;
+      if (event.key === 'Escape' && typing) { event.target.blur(); return; }
+      if (typing) return;
+      runShortcut(event.key.toLowerCase());
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, showWorkspace, toOverlay, workspaceOpen]);
+  }, [runShortcut]);
 
   const connect = async (url) => {
     try { await actions.setTargetUrl(url); setSelected(null); onStatus(`Connected to ${url}`, 'ok'); }

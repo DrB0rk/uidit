@@ -49,7 +49,7 @@ export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, o
         className="btn"
         aria-pressed={mode === 'inspect'}
         onClick={() => onMode('inspect')}
-        title="Click any element to tag it (1)"
+        title="Click any element to tag it (I)"
       >
         <MousePointer2 size={15} aria-hidden="true" />
         Inspect
@@ -58,7 +58,7 @@ export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, o
         className="btn"
         aria-pressed={mode === 'text'}
         onClick={() => onMode('text')}
-        title="Edit text in place (2)"
+        title="Edit text in place"
       >
         <Type size={15} aria-hidden="true" />
         Text
