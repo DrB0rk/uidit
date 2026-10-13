@@ -193,7 +193,7 @@ Provide a direct feedback action even while nothing is selected. Show a badge fo
 
 ### Right slide-out drawer
 
-Approx. 380–420px at desktop, adaptive mobile full-width sheet. App remains visible and can be interacted with while drawer is open; optional transparent resizer/reflow mode.
+Resizable at desktop: 420px by default, dragged between 320px and 760px from its left edge (arrow keys and Home/End on the focused separator, width remembered per browser) while at least 360px of preview stays visible; adaptive mobile full-width sheet without a resizer. App remains visible and can be interacted with while drawer is open.
 
 Sections / tabs:
 

@@ -11,6 +11,22 @@ const TABS = [['feedback', 'Feedback', MessageSquareText], ['design', 'Design', 
 const PRIMARY_TABS = TABS.slice(0, 4);
 const MORE_TABS = TABS.slice(4);
 const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
+// The review panel resizes by dragging its edge; the preview keeps the rest of the width.
+const DRAWER_KEY = 'uidit-drawer-width';
+const DRAWER_MIN = 320;
+const DRAWER_MAX = 760;
+const DRAWER_DEFAULT = 420;
+const DRAWER_PREVIEW_MIN = 360;
+
+function drawerMax() {
+  // The preview stage sits 12px in from the left, so its width is
+  // viewport - 12 - drawer; keep DRAWER_PREVIEW_MIN of it visible.
+  try { return Math.max(DRAWER_MIN, Math.min(DRAWER_MAX, window.innerWidth - DRAWER_PREVIEW_MIN - 12)); } catch { return DRAWER_MAX; }
+}
+function clampDrawerWidth(width) {
+  const cap = drawerMax();
+  return Math.round(Math.max(DRAWER_MIN, Math.min(Number.isFinite(width) ? width : DRAWER_DEFAULT, cap)));
+}
 
 export default function Dashboard() {
   const { config, session, status: live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
@@ -40,6 +56,26 @@ export default function Dashboard() {
   }, [theme]);
 
   useEffect(() => { try { localStorage.setItem('uidit-device', device); } catch {} }, [device]);
+
+  const [drawerWidth, setDrawerWidth] = useState(() => {
+    try { const stored = Number(localStorage.getItem(DRAWER_KEY)); return stored > 0 ? clampDrawerWidth(stored) : DRAWER_DEFAULT; } catch { return DRAWER_DEFAULT; }
+  });
+  const [resizingDrawer, setResizingDrawer] = useState(false);
+  const drawerDrag = useRef(null);
+  const mainRef = useRef(null);
+
+  // The width lands on the element itself rather than a rendered style attribute:
+  // the server render has no access to the stored value, and hydration keeps the
+  // server's attribute for custom properties.
+  useEffect(() => { mainRef.current?.style.setProperty('--drawer-width', `${drawerWidth}px`); }, [drawerWidth]);
+
+  useEffect(() => { try { localStorage.setItem(DRAWER_KEY, String(drawerWidth)); } catch {} }, [drawerWidth]);
+
+  useEffect(() => {
+    const onResize = () => setDrawerWidth((width) => clampDrawerWidth(width));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -235,13 +271,40 @@ export default function Dashboard() {
   };
   const select = (id) => { const item = session.elements.find((element) => element.id === id); if (!item) return; setSelected(item); toOverlay({ type: 'flashSelector', selector: item.selector }); };
   const hideControls = () => { toOverlay({ type: 'hideControls' }); setWorkspaceOpen(false); };
+  const startDrawerResize = (event) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drawerDrag.current = { x: event.clientX, width: drawerWidth };
+    setResizingDrawer(true);
+  };
+  const moveDrawerResize = (event) => {
+    const drag = drawerDrag.current;
+    if (!drag) return;
+    setDrawerWidth(clampDrawerWidth(drag.width - (event.clientX - drag.x)));
+  };
+  const endDrawerResize = (event) => {
+    if (!drawerDrag.current) return;
+    drawerDrag.current = null;
+    setResizingDrawer(false);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const nudgeDrawer = (event) => {
+    const step = event.shiftKey ? 96 : 24;
+    const next = event.key === 'ArrowLeft' ? drawerWidth + step
+      : event.key === 'ArrowRight' ? drawerWidth - step
+      : event.key === 'Home' ? DRAWER_MIN
+      : event.key === 'End' ? DRAWER_MAX
+      : null;
+    if (next === null) return;
+    event.preventDefault();
+    setDrawerWidth(clampDrawerWidth(next));
+  };
   const changeTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     toOverlay({ type: 'theme', theme: next });
   };
 
-  return <main className={`immersive${workspaceOpen ? ' workspace-open' : ''}`}>
+  return <main ref={mainRef} className={`immersive${workspaceOpen ? ' workspace-open' : ''}${resizingDrawer ? ' resizing' : ''}`}>
     {targetUrl ? <>
       <div className={`preview-device-stage device-${device}${viewportLayout > 1 ? ' multi-viewport' : ''}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100, '--custom-width': `${customViewport.width}px`, '--custom-height': `${customViewport.height}px` }}>
         {Array.from({ length: viewportLayout }, (_, index) => {
@@ -261,11 +324,27 @@ export default function Dashboard() {
         <label className="custom-viewport">Custom <input aria-label="Custom viewport width" type="number" min="240" max="2560" value={customViewport.width} onChange={(event) => setCustomViewport((value) => ({ ...value, width: Math.max(240, Math.min(2560, Number(event.target.value) || 240)) }))} /> × <input aria-label="Custom viewport height" type="number" min="320" max="1800" value={customViewport.height} onChange={(event) => setCustomViewport((value) => ({ ...value, height: Math.max(320, Math.min(1800, Number(event.target.value) || 320)) }))} /><button type="button" className="btn sm" onClick={() => { setDevice('custom'); setViewportLayout(1); }}>Apply</button></label>
       </div>}
     </> : <section className="immersive-empty"><h1>Start reviewing your app</h1><p>Run <code>uidit</code> from your project to launch its development server, or connect a local server below.</p><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /></section>}
-    {workspaceOpen && <section className="workspace-drawer" aria-label="UIDIT review workspace">
+    {workspaceOpen && <section className={`workspace-drawer${drawerWidth < 400 ? ' compact' : ''}`} id="uidit-workspace" aria-label="UIDIT review workspace">
+      <div
+        className="workspace-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize review panel"
+        aria-controls="uidit-workspace"
+        aria-valuemin={DRAWER_MIN}
+        aria-valuemax={Math.round(drawerMax())}
+        aria-valuenow={drawerWidth}
+        tabIndex={0}
+        onPointerDown={startDrawerResize}
+        onPointerMove={moveDrawerResize}
+        onPointerUp={endDrawerResize}
+        onPointerCancel={endDrawerResize}
+        onKeyDown={nudgeDrawer}
+      />
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><details className="workspace-more"><summary className={MORE_TABS.some(([id]) => tab === id) ? 'active' : ''} aria-label="More workspace sections" title="More workspace sections"><Ellipsis size={17} aria-hidden="true"/><span>More</span></summary><div className="workspace-more-menu">{MORE_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={(event) => { setTab(id); event.currentTarget.closest('details').open = false; }}><Icon size={15} aria-hidden="true"/><span>{label}</span></button>)}</div></details><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
       {targetUrl && <Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
       <div className="workspace-meta"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><code>{dev?.url ?? targetUrl ?? 'no target'}</code></div>
-      <nav className="workspace-tabs" aria-label="Review workspace sections">{PRIMARY_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span>{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
+      <nav className="workspace-tabs" aria-label="Review workspace sections">{PRIMARY_TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
         {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
         {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}

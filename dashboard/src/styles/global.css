@@ -530,10 +530,10 @@ kbd {
 }
 
 /* In-page review surface: the application remains the full-page background. */
-.immersive { position: fixed; inset: 0; min-height: 100dvh; overflow: hidden; isolation: isolate; background: #f4f3ed; }
+.immersive { --drawer-width: min(420px, 100vw); position: fixed; inset: 0; min-height: 100dvh; overflow: hidden; isolation: isolate; background: #f4f3ed; }
 .immersive.workspace-open { background: var(--surface); }
 .preview-device-stage { --preview-width:100%; --preview-height:100%; position:absolute; inset:12px; display:flex; align-items:center; justify-content:center; overflow:auto; background:#f4f3ed; }
-.immersive.workspace-open .preview-device-stage { right:min(420px,100vw); top:54px; inset-block-end:12px; }
+.immersive.workspace-open .preview-device-stage { right:var(--drawer-width); top:54px; inset-block-end:12px; }
 .preview-device-stage.device-tablet { --preview-width:min(768px,100%); --preview-height:1024px; }
 .preview-device-stage.device-phone { --preview-width:min(390px,100%); --preview-height:844px; }
 .preview-live-frame { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); min-height:0; overflow:hidden; outline:1px solid #dedee7; outline-offset:-1px; border-radius:16px; background:#fff; box-shadow:0 12px 36px #17182220; transition:width .2s ease,flex-basis .2s ease; }
@@ -561,15 +561,23 @@ kbd {
 .preview-reference-side { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); overflow:hidden; border:1px solid var(--border); border-radius:16px; background:var(--raised); box-shadow:0 10px 28px #17182215; }
 .preview-reference-side > span { position:absolute; z-index:1; top:8px; left:8px; padding:4px 7px; border-radius:6px; background:var(--canvas); color:var(--fg); font-size:10px; }
 .preview-reference-side img { display:block; width:100%; height:100%; object-fit:contain; }
-.device-toolbar { position:absolute; z-index:5; top:12px; left:calc((100% - min(420px,100vw)) / 2); display:flex; align-items:center; gap:2px; transform:translateX(-50%); padding:3px; border:1px solid var(--border); border-radius:10px; color:var(--fg); background:var(--surface); box-shadow:var(--shadow-raised); }
+.device-toolbar { position:absolute; z-index:5; top:12px; left:calc(12px + (100% - var(--drawer-width) - 12px) / 2); display:flex; align-items:center; gap:2px; transform:translateX(-50%); padding:3px; border:1px solid var(--border); border-radius:10px; color:var(--fg); background:var(--surface); box-shadow:var(--shadow-raised); }
 .device-toolbar button { display:inline-flex; align-items:center; gap:5px; min-height:29px; padding:4px 8px; border:0; border-radius:7px; color:var(--fg-muted); background:transparent; font:500 11px var(--font); cursor:pointer; }
 .device-toolbar button:hover,.device-toolbar button.active { color:var(--fg); background:var(--raised); }
 .device-toolbar button.active { box-shadow:inset 0 0 0 1px var(--border); }
-.immersive.workspace-open .immersive-empty { right: min(420px, 100vw); }
+.immersive.workspace-open .immersive-empty { right: var(--drawer-width); }
 .immersive-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--fg); text-align: center; }
 .immersive-empty h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
 .immersive-empty p { max-width: 520px; color: var(--fg-muted); }
-.workspace-drawer { position: absolute; z-index: 20; inset: 0 0 0 auto; width: min(420px, 100vw); display: flex; flex-direction: column; min-height: 0; color: var(--fg); background: var(--surface); animation: drawer-in .22s cubic-bezier(.2,.75,.24,1); }
+.workspace-drawer { position: absolute; z-index: 20; inset: 0 0 0 auto; width: var(--drawer-width); display: flex; flex-direction: column; min-height: 0; color: var(--fg); background: var(--surface); animation: drawer-in .22s cubic-bezier(.2,.75,.24,1); }
+/* The panel edge is the resize handle: a 1px rule inside an 11px grab area that
+   straddles the boundary, so it is easy to hit without adding chrome. */
+.workspace-resizer { position: absolute; z-index: 30; top: 0; bottom: 0; left: -5px; width: 11px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.workspace-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: var(--border); transition: background .12s, width .12s; }
+.workspace-resizer:hover::before,.workspace-resizer:focus-visible::before,.immersive.resizing .workspace-resizer::before { width: 2px; background: var(--accent-text); }
+.workspace-resizer:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -3px; }
+.immersive.resizing { user-select: none; }
+.immersive.resizing,.immersive.resizing * { cursor: col-resize !important; }
 @keyframes drawer-in { from { transform: translateX(102%); } to { transform: translateX(0); } }
 .workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 19px 13px; border-bottom: 1px solid var(--border); flex: none; }
 .workspace-head-actions { display: flex; align-items: center; gap: 8px; }
@@ -586,7 +594,8 @@ kbd {
 .theme-toggle:hover { color: var(--fg); border-color: var(--accent-text); }
 .workspace-brand { font-size: 16px; font-weight: 750; letter-spacing: -.5px; }
 .workspace-brand span { padding-left: 6px; color: var(--fg-subtle); font-size: 10px; font-weight: 500; letter-spacing: .08em; }
-.workspace-caption { margin-top: 3px; color: var(--fg-muted); font-size: 11px; }
+.workspace-head > div:first-child { min-width: 0; }
+.workspace-caption { margin-top: 3px; overflow: hidden; color: var(--fg-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-close { width: 32px; height: 32px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--fg); background: var(--raised); font-size: 22px; line-height: 1; }
 .workspace-drawer .bar { flex: none; padding: 9px 12px; gap: 6px; }
 .workspace-drawer .brand { display: none; }
@@ -599,6 +608,10 @@ kbd {
 .status-dot.online { background: var(--ok-text); }
 .workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; flex: none; padding: 9px 13px 11px; border-bottom: 1px solid var(--border); }
 .workspace-tabs button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; min-height: 35px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; color: var(--fg-muted); background: transparent; font-size: 11px; font-weight: 560; text-align: left; white-space: nowrap; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+/* Narrowed below the default width, the sections stay icon-only so their labels
+   never truncate into ambiguity; aria-label and title carry the name. */
+.workspace-drawer.compact .workspace-tabs button { justify-content: center; gap: 5px; padding: 0 4px; }
+.workspace-drawer.compact .workspace-tabs .tab-label { display: none; }
 .workspace-tabs button:hover { color: var(--fg); background: var(--raised); }
 .workspace-tabs button.active { color: var(--fg); background: var(--raised); border-color: var(--border); box-shadow: 0 1px 2px #1718220a; }
 .workspace-tabs button > span:not(.tab-count) { overflow: hidden; text-overflow: ellipsis; }
@@ -839,6 +852,7 @@ kbd {
   .device-toolbar button { padding-inline:6px; }
   .immersive.workspace-open .immersive-empty { position: relative; inset: auto; min-height: 48dvh; flex: 0 0 48dvh; }
   .workspace-drawer { position: relative; inset: auto; width: 100%; height: 52dvh; flex: 1 1 52dvh; }
+  .workspace-resizer { display: none; }
   .workspace-drawer .target { width: 100%; }
   .workspace-drawer .bar { gap: 5px; }
   .workspace-drawer .bar .field { flex: 1 1 190px; }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.3 — 2026-10-13
+
+- The review panel is resizable: drag its left edge, or focus that edge and use ArrowLeft/ArrowRight (Home and End jump to the limits). It stays between 320px and 760px, keeps at least 360px of preview on smaller windows, and remembers the width per browser.
+- The edge is an accessible separator (`role="separator"`, `aria-valuenow`/`min`/`max`, keyboard-operable) with an 11px grab area around its 1px rule, and the pointer keeps resizing even across the preview frame.
+- The preview, the device toolbar and the start screen all follow the panel width. Below 400px the workspace tabs become icon-only so their labels never truncate, and the header caption clips to one line. Small screens keep the full-width sheet without a resizer.
+
 ## 0.8.2 — 2026-10-13
 
 - The in-page button now follows the pointer while you drag it, and stays exactly where you drop it. The old model moved nothing until release and then snapped to one of nine viewport cells, which could park the button (and the panel under it) somewhere you did not ask for.

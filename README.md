@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.8.2">Latest release: v0.8.2</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.8.3">Latest release: v0.8.3</a> · Node.js 22+</p>
 
 ---
 
@@ -40,6 +40,9 @@ other projects, pass a command explicitly with `uidit -- cargo run`, or configur
 `dev.command` in `.uidit/config.json`. UIDIT never runs install commands. Use
 `uidit --attach http://127.0.0.1:3000` to connect without owning that server, or
 `uidit --no-start` for manual discovery.
+
+The review panel on the right resizes by dragging its left edge, or with the arrow keys
+and Home/End while that edge is focused. UIDIT remembers the width you choose.
 
 ![UIDIT reviewing the fully styled Northstar Demo Shop checkout](docs/screenshots/storefront/overview.png)
 
