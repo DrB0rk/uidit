@@ -63,9 +63,26 @@ function serveStatic(res, file, { injectOverlay = false } = {}) {
   res.end(body);
 }
 
-export function injectIntoHtml(html, targetOrigin = '', controlOrigin = 'http://127.0.0.1:7718') {
+/**
+ * Extra loopback origins allowed to host the preview and receive its overlay
+ * messages, from `ui.frameAncestors`. Non-loopback entries are dropped: the
+ * bridge relays review writes, so it must never be reachable off-machine.
+ */
+function bridgeOrigins(cwd) {
+  const configured = store.readConfig(cwd)?.ui?.frameAncestors;
+  return (Array.isArray(configured) ? configured : [])
+    .map((value) => { try { const url = new URL(String(value)); return url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(url.hostname) ? url.origin : null; } catch { return null; } })
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function injectIntoHtml(html, targetOrigin = '', controlOrigin = 'http://127.0.0.1:7718', bridgeOrigins = '') {
   const attr = (value) => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
-  const tag = `<link rel="stylesheet" href="/overlay.css" data-uidit="1"><script src="/overlay.js" data-uidit="1" data-target="${attr(targetOrigin)}" data-control="${attr(controlOrigin)}"></script>`;
+  // data-bridge tells the overlay which further origins may host it, so a review
+  // workspace served from another local port can still receive its messages.
+  // Without it the overlay only trusts a parent on the control port.
+  const bridge = bridgeOrigins ? ` data-bridge="${attr(bridgeOrigins)}"` : '';
+  const tag = `<link rel="stylesheet" href="/overlay.css" data-uidit="1"><script src="/overlay.js" data-uidit="1" data-target="${attr(targetOrigin)}" data-control="${attr(controlOrigin)}"${bridge}></script>`;
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}\n${tag}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}\n<head>${tag}</head>`);
   return `${tag}\n${html}`;
@@ -175,7 +192,7 @@ function extendPreviewCsp(headers, controlOrigin) {
  * stack-agnostic — no assumptions about the framework behind the target beyond
  * "it serves HTTP and returns HTML documents".
  */
-async function proxyRequest(req, res, target, controlOrigin) {
+async function proxyRequest(req, res, target, controlOrigin, cwd = process.cwd()) {
   const url = new URL(target.href);
   url.hostname = await resolveReachable(url);
   const client = url.protocol === 'https:' ? https : http;
@@ -208,7 +225,7 @@ async function proxyRequest(req, res, target, controlOrigin) {
       const chunks = [];
       up.on('data', (c) => chunks.push(c));
       up.on('end', () => {
-        const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), url.origin, controlOrigin);
+        const html = injectIntoHtml(Buffer.concat(chunks).toString('utf8'), url.origin, controlOrigin, bridgeOrigins(cwd));
         const outHeaders = scrubHtmlHeaders(extendPreviewCsp(headers, controlOrigin));
         outHeaders['content-length'] = Buffer.byteLength(html);
         res.writeHead(status, outHeaders);
@@ -424,7 +441,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         // uidit's own reload cache-buster is not part of the target's URL space.
         url.searchParams.delete('r');
         target.search = url.search;
-        return proxyRequest(req, res, target, controlOrigin());
+        return proxyRequest(req, res, target, controlOrigin(), cwd);
       }
 
       // The previewed page runs on uidit's origin, so its own URLs — root-absolute
@@ -435,7 +452,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         const target = safeTargetUrl(config.targetUrl);
         target.pathname = `${target.pathname.replace(/\/$/, '')}${route}`;
         target.search = url.search;
-        return proxyRequest(req, res, target, controlOrigin());
+        return proxyRequest(req, res, target, controlOrigin(), cwd);
       }
 
       return json(res, 404, { error: 'not found' });

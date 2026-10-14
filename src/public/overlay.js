@@ -88,12 +88,16 @@
   const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:7718';
   // The dashboard may have been opened as localhost while the bridge uses the
   // numeric loopback address. Use the actual embedding origin for postMessage.
+  // `data-bridge` adds origins that may host the preview from another local port
+  // (the agent-native review workspace); without it only the control port is trusted.
   const parentOrigin = (() => {
+    const allowedBridge = new Set(String(bootstrap?.dataset.bridge || '').split(/\s+/).filter(Boolean));
     try {
       const origin = new URL(document.referrer).origin;
       const parentUrl = new URL(origin);
       const expectedPort = new URL(controlOrigin).port;
-      return ['localhost', '127.0.0.1', '[::1]'].includes(parentUrl.hostname) && parentUrl.port === expectedPort ? origin : controlOrigin;
+      const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parentUrl.hostname);
+      return loopback && (parentUrl.port === expectedPort || allowedBridge.has(origin)) ? origin : controlOrigin;
     } catch { return controlOrigin; }
   })();
   window.__UIDIT_TARGET__ = bootstrap?.dataset.target || '';

@@ -41,10 +41,32 @@ Before building common workspace or agent UI, read `agent-native-toolkit`; for s
 - **Conventions.** Times are UTC ISO 8601. Element matches come from observed page context and are suggestions — confirm them in source before proposing an edit.
 - **Navigation.** `view: "review"` at `/review`.
 
+### Live preview and the page editor
+
+`/review` embeds the previewed app in an iframe and edits it in place. The preview is
+served by the main `uidit` process, which injects its overlay; the injected overlay
+cannot call this app's actions directly, so it asks its parent to relay each `/api/*`
+call over `postMessage` and `useOverlayBridge` forwards it to the shared actions.
+
+- The two halves must agree on an origin. The overlay only trusts a parent on its
+  control port, so `ui.frameAncestors` in `.uidit/config.json` lists further loopback
+  origins; those are emitted as `data-bridge` on the injected script and added to the
+  floating-controls CSP. A workspace on another port without this entry will show
+  "Connecting to preview…" forever — the overlay is running, but every message is dropped.
+- The relay keeps the overlay's own route names (`/element`, `/comment`,
+  `/comment-reply`, `/edit`) so an unrecognised route fails loudly instead of writing
+  somewhere unexpected.
+- An element pick writes through `tag-element`, which returns `{ element }` — the
+  overlay replays that value when it confirms a selection.
+- Edits preview live in the iframe and are recorded as `before → after`; they stay
+  uncommitted until `mark-edit-applied`.
+
 | Action | Use |
 | --- | --- |
 | `list-feedback` | Read elements, comments, and edits; unresolved queue by default, `includeResolved` for everything |
+| `get-review-config` | Where the live preview is served, and which target it proxies |
 | `add-comment` | Record user feedback against an element or the page |
 | `update-comment` | Change a comment status and/or reply |
 | `add-edit` | Propose a preview edit (uncommitted) |
 | `mark-edit-applied` | Mark a proposed edit committed to source, or back |
+| `tag-element` | Record an element picked in the live preview |

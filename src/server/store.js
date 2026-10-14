@@ -96,7 +96,7 @@ function defaultConfig() {
   return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
     services: [],
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
-    ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false, allowBrowserInspection: false },
+    ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false, allowBrowserInspection: false, frameAncestors: [] },
     mcp: { enabled: true, allowAgentWrites: false, allowAgentServerControl: false, allowBrowserControl: false } };
 }
 

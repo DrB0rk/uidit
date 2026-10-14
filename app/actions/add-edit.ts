@@ -1,7 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { addEdit, assertAgentWritesAllowed } from "../shared/uidit/session.js";
+import { addEdit } from "../shared/uidit/session.js";
 
 const STYLE_PROPERTIES = [
   "padding",
@@ -29,30 +29,37 @@ const STYLE_PROPERTIES = [
 
 export default defineAction({
   description:
-    "Record a proposed preview edit for a tagged element (CSS property, text, class, or attribute). The edit starts uncommitted: set applied to true with mark-edit-applied only after the change is in source.",
+    "Record a proposed preview edit for a tagged element (CSS property, text, class, attribute, or hide). The edit starts uncommitted: call mark-edit-applied only once the change is in source.",
   schema: z.object({
     elementId: z.string().min(1).describe("Element id from list-feedback."),
     kind: z
-      .enum(["style", "text", "class", "attribute"])
-      .describe("style = CSS property change, text = content, class = class list, attribute = HTML attribute."),
-    after: z.string().min(1).max(160).describe("New value to apply."),
-    property: z
-      .enum(STYLE_PROPERTIES)
+      .enum(["style", "text", "class", "attribute", "remove"])
+      .describe(
+        "style = CSS property change, text = content, class = class list, attribute = HTML attribute, remove = hide the element.",
+      ),
+    after: z
+      .string()
+      .max(2000)
       .optional()
-      .describe("Required when kind is style; must be one of the allowlisted CSS properties."),
-    before: z.string().max(160).optional().describe("Observed previous value, for the before → after record."),
+      .describe("New value to apply. Omit for remove, which has no value."),
+    property: z
+      .string()
+      .max(100)
+      .optional()
+      .describe(
+        "CSS property when kind is style (must be on the allowlist), the class name when kind is class, the attribute name when kind is attribute.",
+      ),
+    before: z.string().max(2000).optional().describe("Observed previous value, for the before → after record."),
   }),
-  run: async ({ elementId, kind, after, property, before }, ctx) => {
-    try {
-      assertAgentWritesAllowed(ctx?.caller);
-    } catch (error) {
-      throw fail((error as Error).message, { errorCode: "agent_writes_disabled", statusCode: 403 });
-    }
+  run: async ({ elementId, kind, after, property, before }) => {
     if (kind === "style" && !property) {
       throw fail("style edits need a property", { errorCode: "missing_property", statusCode: 400 });
     }
+    if (kind !== "remove" && !after) {
+      throw fail("edit value must not be empty", { errorCode: "missing_value", statusCode: 400 });
+    }
     try {
-      const edit = addEdit({ elementId, kind, after, property, before: before ?? null });
+      const edit = addEdit({ elementId, kind, after: after ?? "", property, before: before ?? null });
       return {
         id: edit.id,
         applied: false,

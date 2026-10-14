@@ -232,8 +232,9 @@ export function addEdit(
   if (input.kind === "style" && !STYLE_PROPERTIES[input.property as string]) {
     throw new Error(`style edits must target an allowlisted property: ${input.property}`);
   }
-  const after = String(input.after ?? "").slice(0, 160);
-  if (!after) throw new Error("edit value must not be empty");
+  const after = String(input.after ?? "").slice(0, 2000);
+  // `remove` hides the element and has no value to apply.
+  if (!after && input.kind !== "remove") throw new Error("edit value must not be empty");
   if (/[<>]/.test(after) || /url\s*\(|expression\s*\(/i.test(after)) {
     throw new Error("edit value contains unsupported syntax");
   }

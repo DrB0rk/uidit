@@ -52,6 +52,29 @@ function safeConfig(cwd, previewPort) {
   return { ...store.readConfig(cwd), previewUrl: `http://127.0.0.1:${previewPort}` };
 }
 
+/**
+ * Origins allowed to frame the floating controls page.
+ *
+ * UIDIT's own preview and control origins are always permitted. `ui.frameAncestors`
+ * adds further loopback origins, such as the agent-native review workspace, which
+ * embeds the preview. Anything non-loopback or non-HTTP is ignored: framing is a
+ * privilege, and a stray config value must not widen it to the open internet.
+ */
+function frameAncestorList(cwd, previewPort, actualPort) {
+  const allowed = [
+    `http://127.0.0.1:${previewPort}`, `http://localhost:${previewPort}`,
+    `http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`,
+  ];
+  const configured = store.readConfig(cwd)?.ui?.frameAncestors;
+  for (const value of Array.isArray(configured) ? configured : []) {
+    try {
+      const url = new URL(String(value));
+      if (url.protocol === 'http:' && isLoopback(url.hostname) && !allowed.includes(url.origin)) allowed.push(url.origin);
+    } catch {}
+  }
+  return allowed.join(' ');
+}
+
 function serveControlStatic(req, res) {
   const pathname = decodeURIComponent(new URL(req.url, 'http://uidit.local').pathname);
   const requested = pathname === '/' ? 'index.html' : pathname.slice(1);
@@ -363,7 +386,7 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
     try {
       const route = url.pathname;
       if (route === '/floating' && req.method === 'GET') {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors http://127.0.0.1:${previewPort} http://localhost:${previewPort} http://127.0.0.1:${actualPort} http://localhost:${actualPort}`, 'x-content-type-options': 'nosniff' });
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors ${frameAncestorList(cwd, previewPort, actualPort)}`, 'x-content-type-options': 'nosniff' });
         return fs.createReadStream(FLOATING_HTML).pipe(res);
       }
       if (route === '/html-to-image.js' && req.method === 'GET') {
