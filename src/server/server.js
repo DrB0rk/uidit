@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './store.js';
+import { runReviewAction } from '../actions/review.js';
 import * as flowStore from './flow-store.js';
 import * as taskStore from './tasks.js';
 import { resolveElementSource } from './source-map.js';
@@ -355,28 +356,27 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
           return json(res, 200, { config });
         }
         if (route === '/api/element' && req.method === 'POST') {
-          const body = await readBody(req);
-          const record = store.upsertElement(cwd, body);
+          const result = runReviewAction('tag-element', cwd, await readBody(req));
           hub.notify();
-          return json(res, 200, { element: record, session: store.readSession(cwd) });
+          return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
         if (route === '/api/comment' && req.method === 'POST') {
-          const record = store.addComment(cwd, await readBody(req));
+          const result = runReviewAction('add-comment', cwd, await readBody(req));
           hub.notify();
-          return json(res, 200, { comment: record, session: store.readSession(cwd) });
+          return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
         const reply = route.match(/^\/api\/comments\/([^/]+)\/replies$/);
         if (reply && req.method === 'POST') {
           const body = await readBody(req);
-          const result = store.addCommentReply(cwd, decodeURIComponent(reply[1]), { text: body.text, author: 'reviewer', source: 'reviewer' });
+          const result = runReviewAction('reply-comment', cwd, { commentId: decodeURIComponent(reply[1]), text: body.text });
           if (!result) return json(res, 404, { error: 'comment not found' });
           hub.notify();
           return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
         if (route === '/api/edit' && req.method === 'POST') {
-          const record = store.addEdit(cwd, await readBody(req));
+          const result = runReviewAction('add-edit', cwd, await readBody(req));
           hub.notify();
-          return json(res, 200, { edit: record, session: store.readSession(cwd) });
+          return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
 
         const patch = route.match(/^\/api\/(comments|edits|elements)\/([^/]+)$/);
@@ -388,10 +388,10 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
             if (!Array.isArray(body.codeRefs) || body.codeRefs.length > 50) throw new Error('codeRefs must contain at most 50 project-relative references');
             body.codeRefs = body.codeRefs.map(store.normalizeCodeReference);
           }
-          const record = store.updateRecord(cwd, patch[1], decodeURIComponent(patch[2]), body);
-          if (!record) return json(res, 404, { error: 'not found' });
+          const result = runReviewAction('update-record', cwd, { collection: patch[1], id: decodeURIComponent(patch[2]), patch: body });
+          if (!result) return json(res, 404, { error: 'not found' });
           hub.notify();
-          return json(res, 200, { record, session: store.readSession(cwd) });
+          return json(res, 200, { ...result, session: store.readSession(cwd) });
         }
         if (patch && req.method === 'DELETE') {
           const ok = store.removeRecord(cwd, patch[1], decodeURIComponent(patch[2]));
