@@ -16,6 +16,7 @@ import { exportFlowAsPlaywright } from '../src/server/flow-export.js';
 import { createServiceManager } from '../src/server/process-manager.js';
 import { createSelectiveVerifier } from '../src/server/verification.js';
 import { describeReviewActions, runReviewAction } from '../src/actions/review.js';
+import { assertAgentWritesAllowed } from '../src/server/agent-policy.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -377,4 +378,23 @@ test('every registry write reaches the session it was given', () => {
   assert.equal(session.elements.length, 1);
   assert.equal(session.edits[0].applied, true);
   assert.equal(updated.before, '12px');
+});
+
+test('agent writes are refused unless the project opts in', () => {
+  // Was copy-pasted at eleven MCP call sites; one function means a new tool
+  // cannot forget it, and this test covers every tool that uses it.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.throws(() => assertAgentWritesAllowed(cwd), /Agent writes are disabled/);
+
+  store.writeConfig(cwd, { mcp: { allowAgentWrites: true } });
+  assert.doesNotThrow(() => assertAgentWritesAllowed(cwd));
+
+  store.writeConfig(cwd, { mcp: { allowAgentWrites: false } });
+  assert.throws(() => assertAgentWritesAllowed(cwd), /Agent writes are disabled/);
+});
+
+test('an uninitialized project has no agent-write policy to breach', () => {
+  const cwd = tmpProject();
+  assert.doesNotThrow(() => assertAgentWritesAllowed(cwd));
 });

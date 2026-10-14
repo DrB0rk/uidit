@@ -13,6 +13,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, SubscribeRequestSchema, UnsubscribeRequestSchema, ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import * as store from '../store.js';
 import { runReviewAction } from '../../actions/review.js';
+import { assertAgentWritesAllowed } from '../agent-policy.js';
 import * as flowStore from '../flow-store.js';
 import * as taskStore from '../tasks.js';
 import { triageFeedback } from '../triage.js';
@@ -211,27 +212,27 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
   });
   server.registerTool('uidit_export_flow_as_playwright', { description: 'Generate a Playwright test from a saved UIDIT flow. Entered form values are omitted and replaced by environment placeholders; selectors are asserted unique so drift fails visibly.', inputSchema: { flowId: z.string().min(1).max(200) } }, async ({ flowId }) => { const flow = store.readSession(cwd).flows.find((item) => item.id === flowId); if (!flow) throw new Error('flow not found'); return result({ fileName: `${flow.name.replace(/[^a-z0-9-_]+/gi, '-').slice(0,80) || 'uidit-flow'}.spec.js`, code: exportFlowAsPlaywright(flow), privacy: 'Recorded form values are excluded from generated code.' }); });
   server.registerTool('uidit_create_task', { description: 'Create an agent task linked to existing comments and preview edits. Requires agent write permission.', inputSchema: { title: z.string().trim().min(1).max(200), commentIds: z.array(z.string().max(200)).max(100).optional(), editIds: z.array(z.string().max(200)).max(100).optional() } }, async (args) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const task = taskStore.createTask(cwd, { ...args, actor: 'agent' }); hub.notify(); return result({ task });
   });
   server.registerTool('uidit_claim_task', { description: 'Claim a task with an agent identity and optimistic revision check.', inputSchema: { taskId: z.string().min(1).max(200), owner: z.string().min(1).max(120), expectedRevision: z.number().int().positive() } }, async ({ taskId, owner, expectedRevision }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const task = taskStore.updateTask(cwd, taskId, { owner, status: 'in_progress' }, { expectedRevision, actor: owner }); if (!task) throw new Error('task not found'); hub.notify(); return result({ task });
   });
   server.registerTool('uidit_update_task', { description: 'Update task progress, state, changed files or commit reference. Human acceptance is reserved for the reviewer.', inputSchema: { taskId: z.string().min(1).max(200), expectedRevision: z.number().int().positive(), status: z.enum(['acknowledged', 'in_progress', 'implemented', 'verified', 'blocked', 'rejected', 'reopened', 'cancelled']).optional(), detail: z.string().max(1000).optional(), changedFiles: z.array(z.string().max(500)).max(100).optional(), commit: z.string().max(500).nullable().optional() } }, async ({ taskId, expectedRevision, ...patch }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const task = taskStore.updateTask(cwd, taskId, patch, { expectedRevision, actor: 'agent' }); if (!task) throw new Error('task not found'); hub.notify(); return result({ task });
   });
   server.registerTool('uidit_attach_evidence', { description: 'Append test, screenshot, visual comparison, audit, diagnostic or manual evidence to a task.', inputSchema: { taskId: z.string().min(1).max(200), type: z.enum(['test', 'screenshot', 'visual-diff', 'audit', 'diagnostic', 'manual', 'source']), result: z.enum(['passed', 'failed', 'review_required', 'not_run', 'unsupported', 'timeout', 'note']), summary: z.string().max(1000), reference: z.string().max(1000).optional(), metadata: z.record(z.string(), z.unknown()).optional() } }, async ({ taskId, ...evidence }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const record = taskStore.addEvidence(cwd, taskId, evidence, { actor: 'agent' }); if (!record) throw new Error('task not found'); hub.notify(); return result({ evidence: record });
   });
   server.registerTool('uidit_submit_for_review', { description: 'Submit an implemented task for reviewer verification. This does not accept the task.', inputSchema: { taskId: z.string().min(1).max(200), expectedRevision: z.number().int().positive(), changedFiles: z.array(z.string().max(500)).max(100).optional(), commit: z.string().max(500).nullable().optional(), detail: z.string().max(1000).optional() } }, async ({ taskId, expectedRevision, ...patch }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const task = taskStore.updateTask(cwd, taskId, { ...patch, status: 'implemented' }, { expectedRevision, actor: 'agent' }); if (!task) throw new Error('task not found'); hub.notify(); return result({ task, next: 'Reviewer can inspect evidence and accept or reopen.' });
   });
   server.registerTool('uidit_propose_visual_change', { description: 'Create a declarative, allowlisted, reversible browser-only visual proposal. Does not edit source files.', inputSchema: { elementId: z.string().min(1).max(200), operation: z.enum(['style', 'text', 'class', 'attribute']), title: z.string().max(200).optional(), changes: z.array(z.object({ property: z.string().max(80), before: z.string().max(500).nullable().optional(), value: z.string().max(500) })).min(1).max(12) } }, async (args) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const proposal = taskStore.createProposal(cwd, args, { actor: 'agent' }); hub.notify(); return result({ proposal, sourceChanged: false });
   });
   const liveContext = () => {
@@ -259,7 +260,7 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
     return result(await hub.requestBrowserAction(action, 15000));
   });
   server.registerTool('uidit_link_code', { description: 'Attach a project-relative file and line range to a feedback thread so an agent can locate the implementation.', inputSchema: { commentId: z.string().min(1).max(200), file: z.string().min(1).max(500), startLine: z.number().int().positive(), endLine: z.number().int().positive().optional() } }, async ({ commentId, file, startLine, endLine }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const reference = store.normalizeCodeReference({ file, startLine, endLine });
     const session = store.readSession(cwd); const comment = session.comments.find((item) => item.id === commentId);
     if (!comment) throw new Error('comment not found');
@@ -268,17 +269,17 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
     hub.notify(); return result({ comment: record, reference });
   });
   server.registerTool('uidit_add_comment', { description: 'Add page or element feedback to the shared review session', inputSchema: { text: z.string().min(1).max(4000), page: z.string().max(2000).optional(), elementId: z.string().max(200).nullable().optional() } }, async (args) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const { comment } = runReviewAction('add-comment', cwd, { ...args, source: 'agent' }); hub.notify(); return result({ comment });
   });
   server.registerTool('uidit_reply_comment', { description: 'Reply to a review comment, including an agent reaction or clarifying question. Replies appear in the shared comment thread and on its page marker.', inputSchema: { id: z.string().min(1).max(200), text: z.string().min(1).max(4000) } }, async ({ id, text }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const reply = runReviewAction('reply-comment', cwd, { commentId: id, text, author: 'agent', source: 'agent' });
     if (!reply) throw new Error('comment not found');
     hub.notify(); return result(reply);
   });
   server.registerTool('uidit_update_comment', { description: 'Edit, resolve/reopen, set progress status, or assign a feedback thread to a collaborator', inputSchema: { id: z.string().min(1).max(200), text: z.string().trim().min(1).max(4000).optional(), resolved: z.boolean().optional(), status: z.enum(['open', 'in_progress', 'needs_info']).optional(), assignee: z.string().max(80).nullable().optional(), expectedRevision: z.number().int().nonnegative().optional() } }, async ({ id, expectedRevision, ...patch }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     if (expectedRevision !== undefined && store.readSession(cwd).revision !== expectedRevision) throw new Error('session revision changed; refresh feedback and retry');
     const { record } = runReviewAction('update-record', cwd, { collection: 'comments', id, patch: { ...patch, source: 'agent' } }); if (!record) throw new Error('comment not found'); hub.notify(); return result({ comment: record });
   });
@@ -293,7 +294,7 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
   });
   server.registerTool('uidit_list_edits', { description: 'List recorded preview edits and source application status', inputSchema: {} }, async () => result({ edits: store.readSession(cwd).edits }));
   server.registerTool('uidit_mark_edit_applied', { description: 'Record that an edit was applied to source code', inputSchema: { id: z.string(), provenance: z.string().min(1).max(1000) } }, async ({ id, provenance }) => {
-    if (!store.readConfig(cwd)?.mcp?.allowAgentWrites) throw new Error('Agent writes are disabled in .uidit/config.json');
+    assertAgentWritesAllowed(cwd);
     const { record: edit } = runReviewAction('update-record', cwd, { collection: 'edits', id, patch: { applied: true, appliedAt: new Date().toISOString(), provenance, source: 'agent' } });
     if (!edit) throw new Error('edit not found'); hub.notify(); return result({ edit });
   });
