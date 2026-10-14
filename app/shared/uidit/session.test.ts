@@ -91,9 +91,21 @@ describe("review session invariants", () => {
 
   it("refuses agent writes when mcp.allowAgentWrites is off, but not the reviewer UI", () => {
     storeWriteConfig(root, { mcp: { allowAgentWrites: false } });
-    for (const caller of ["tool", "mcp", "a2a", "cli", "http", undefined]) {
+    for (const caller of [
+      "tool",
+      "mcp",
+      "webmcp",
+      "mcp-widget-write",
+      "a2a",
+      "automation",
+      "cli",
+      "http",
+      undefined,
+    ]) {
       expect(() => assertAgentWritesAllowed(caller, root)).toThrow(/disabled/);
     }
+    // An unrecognised surface fails closed rather than inheriting permission.
+    expect(() => assertAgentWritesAllowed("some-future-surface", root)).toThrow(/disabled/);
     // The reviewer driving the dashboard is not an agent.
     expect(() => assertAgentWritesAllowed("frontend", root)).not.toThrow();
   });

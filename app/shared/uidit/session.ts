@@ -125,21 +125,17 @@ export function readSession(root: string = projectRoot()): ReviewSession {
 }
 
 // `mcp.allowAgentWrites` is the project's existing opt-in for letting an agent
-// change the review session, and the MCP bridge already enforces it. The
-// reviewer driving the dashboard is not an agent, so only agent callers are
-// gated -- otherwise disabling agent writes would disable the UI too.
-const AGENT_CALLERS: Record<string, true> = {
-  tool: true,
-  mcp: true,
-  "mcp-widget-write": true,
-  a2a: true,
-  automation: true,
-  http: true,
-  cli: true,
+// change the review session, and the MCP bridge already enforces it.
+//
+// The gate is expressed as an allowlist of the one surface that is *not* an
+// agent. Enumerating agent callers instead would leave every surface added
+// later -- `webmcp` already slipped through that way -- bypassing the gate.
+const REVIEWER_CALLERS: Record<string, true> = {
+  frontend: true,
 };
 
 export function assertAgentWritesAllowed(caller?: string, root: string = projectRoot()): void {
-  if (caller && !AGENT_CALLERS[caller]) return;
+  if (caller && REVIEWER_CALLERS[caller]) return;
   const config = storeReadConfig(root) as { mcp?: { allowAgentWrites?: boolean } } | null;
   // No config means no UIDIT project is initialized here; nothing to honour.
   if (config && !config.mcp?.allowAgentWrites) {
