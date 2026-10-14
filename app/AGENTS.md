@@ -34,16 +34,16 @@ Before building common workspace or agent UI, read `agent-native-toolkit`; for s
 
 ## UIDIT review app
 
-`/review` is the domain route: the UI review queue for the project. It and the chat agent share one store — the review session in the project's `.uidit/session.json`, read through `shared/uidit/session.ts`, which resolves the nearest ancestor directory containing an initialized `.uidit/config.json`.
+`/review` is the domain route: the UI review queue for the project. It and the chat agent share one store — the review session in the project's `.uidit/session.json`. `shared/uidit/session.ts` is a thin typed entry point over `src/server/store.js`, which stays the single implementation of session semantics (v1→v2 migration, status normalization, anchor fallback, atomic writes). Add a rule there, not a second copy beside it.
 
-- **Invariants.** A comment is never deleted; its status moves within `open → acknowledged → in_progress → implemented → verified → accepted` (with `blocked`, `rejected`, `reopened`, `cancelled`). An `edit` is a proposal and stays `applied: false` until `mark-edit-applied` confirms it is in source. Style edits only allowlist the properties in `STYLE_PROPERTIES`; values reject `<`, `url(`, and `expression(`. An edit must target a tagged element id.
+- **Invariants.** A comment is never deleted; its status moves within `open → acknowledged → in_progress → implemented → verified → accepted` (with `needs_info`, `blocked`, `rejected`, `reopened`, `cancelled`). `verified` and `accepted` are the completion states. An `edit` is a proposal and stays `applied: false` until `mark-edit-applied` confirms it is in source. Style edits only allowlist the properties in `STYLE_PROPERTIES`; values reject `<`, `url(`, and `expression(`. An edit must target a tagged element id.
 - **Report a rejection** with its `errorCode` (`comment_rejected`, `comment_not_found`, `edit_rejected`, `edit_not_found`, `missing_property`, `no_change`) and the action's message; never retry the same rejected input.
 - **Conventions.** Times are UTC ISO 8601. Element matches come from observed page context and are suggestions — confirm them in source before proposing an edit.
 - **Navigation.** `view: "review"` at `/review`.
 
 | Action | Use |
 | --- | --- |
-| `list-feedback` | Read elements, comments, and edits; the open queue by default |
+| `list-feedback` | Read elements, comments, and edits; unresolved queue by default, `includeResolved` for everything |
 | `add-comment` | Record user feedback against an element or the page |
 | `update-comment` | Change a comment status and/or reply |
 | `add-edit` | Propose a preview edit (uncommitted) |

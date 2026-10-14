@@ -1,22 +1,14 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-// The canonical anchor shape lives with the rest of UIDIT so this app and the
-// overlay/relay score anchors identically.
-// @ts-expect-error -- the legacy store is plain JavaScript outside this package.
-import { anchorFor } from "../../../src/server/identity.js";
+// UIDIT already owns session semantics (v1→v2 migration, status normalization,
+// anchor fallback, atomic writes). This module is a typed entry point to that one
+// implementation -- it must never grow a second copy of those rules.
+// @ts-expect-error -- the store is plain JavaScript outside this package.
+import { addComment as storeAddComment, addCommentReply, addEdit as storeAddEdit, readSession as storeReadSession, updateRecord } from "../../../src/server/store.js";
 
 export const UIDIT_DIR = ".uidit";
-
-const EMPTY_SESSION = () => ({
-  version: 2 as const,
-  revision: 0,
-  updatedAt: null as string | null,
-  elements: [] as ReviewElement[],
-  comments: [] as ReviewComment[],
-  edits: [] as ReviewEdit[],
-});
 
 export interface ReviewAnchor {
   selector: string;
@@ -56,12 +48,13 @@ export interface ReviewComment {
   createdAt: string;
   updatedAt?: string;
   anchor?: ReviewAnchor | null;
+  originalAnchor?: ReviewAnchor | null;
   anchorStatus?: string;
 }
 
 export interface ReviewEdit {
   id: string;
-  kind: "style" | "text" | "class" | "attribute";
+  kind: "style" | "text" | "class" | "attribute" | "remove";
   property?: string;
   before: string | null;
   after: string;
@@ -71,13 +64,36 @@ export interface ReviewEdit {
 }
 
 export interface ReviewSession {
-  version: 2;
+  version: number;
   revision: number;
   updatedAt: string | null;
   elements: ReviewElement[];
   comments: ReviewComment[];
   edits: ReviewEdit[];
+  [collection: string]: unknown;
 }
+
+/** Statuses the store treats as completion for a comment. */
+const RESOLVED_STATUSES: Record<string, true> = {
+  verified: true,
+  accepted: true,
+};
+
+// The store coerces an unknown status back to "open" on the next read, which
+// would silently discard the caller's intent. Reject it here instead.
+const COMMENT_STATUSES: Record<string, true> = {
+  open: true,
+  acknowledged: true,
+  in_progress: true,
+  needs_info: true,
+  implemented: true,
+  verified: true,
+  accepted: true,
+  blocked: true,
+  rejected: true,
+  reopened: true,
+  cancelled: true,
+};
 
 /** Nearest ancestor directory (from this app's location) holding an initialized `.uidit`. */
 export function projectRoot(): string {
@@ -92,116 +108,57 @@ export function projectRoot(): string {
 }
 
 function appDir(): string {
-  return path.resolve(import.meta.dirname, "..", "..");
-}
-
-function uiditDir(root: string): string {
-  return path.join(root, UIDIT_DIR);
-}
-
-function writeAtomic(file: string, contents: string): void {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, contents);
-  fs.renameSync(tmp, file);
+  // `import.meta.dirname` is Node 20.11+ but is undefined in some bundled output,
+  // where only the URL is reliable.
+  const fromUrl = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(fromUrl, "..", "..");
 }
 
 export function readSession(root: string = projectRoot()): ReviewSession {
-  const file = path.join(uiditDir(root), "session.json");
-  if (!fs.existsSync(file)) return EMPTY_SESSION();
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ReviewSession>;
-  return {
-    ...EMPTY_SESSION(),
-    ...parsed,
-    revision: Number.isSafeInteger(parsed.revision) ? (parsed.revision as number) : 0,
-    elements: Array.isArray(parsed.elements) ? parsed.elements : [],
-    comments: Array.isArray(parsed.comments) ? parsed.comments : [],
-    edits: Array.isArray(parsed.edits) ? parsed.edits : [],
-  };
-}
-
-export function writeSession(session: ReviewSession, root: string = projectRoot()): ReviewSession {
-  const next: ReviewSession = {
-    ...session,
-    version: 2,
-    revision: (Number(session.revision) || 0) + 1,
-    updatedAt: new Date().toISOString(),
-  };
-  fs.mkdirSync(uiditDir(root), { recursive: true });
-  writeAtomic(path.join(uiditDir(root), "session.json"), `${JSON.stringify(next, null, 2)}\n`);
-  return next;
+  return storeReadSession(root) as ReviewSession;
 }
 
 export function addComment(
   input: { text: string; elementId?: string | null; author?: string },
   root: string = projectRoot(),
 ): ReviewComment {
-  const text = input.text.trim();
-  if (!text || text.length > 4000) throw new Error("comment text must be 1–4000 characters");
   const session = readSession(root);
   const elementId = input.elementId ?? null;
   if (elementId && !session.elements.some((element) => element.id === elementId)) {
     throw new Error(`unknown element: ${elementId}`);
   }
-  const element = elementId ? session.elements.find((item) => item.id === elementId) : undefined;
-  const now = new Date().toISOString();
-  const comment: ReviewComment = {
-    id: `cm-${randomUUID()}`,
+  return storeAddComment(root, {
     elementId,
-    text,
-    status: "open",
-    resolved: false,
-    replies: [],
-    codeRefs: [],
-    createdAt: now,
-    updatedAt: now,
-    anchor: element?.anchor ?? (element ? anchorFor(element) : null),
-    anchorStatus: elementId ? "located" : "missing",
-  };
-  session.comments.push(comment);
-  writeSession(session, root);
-  return comment;
+    text: input.text,
+    page: null,
+    author: input.author ?? "agent",
+    attachments: [],
+  }) as ReviewComment;
 }
-
-const COMMENT_STATUSES: Record<string, true> = {
-  open: true,
-  acknowledged: true,
-  in_progress: true,
-  implemented: true,
-  verified: true,
-  accepted: true,
-  blocked: true,
-  rejected: true,
-  reopened: true,
-  cancelled: true,
-};
 
 export function updateComment(
   id: string,
   patch: { status?: string; replyText?: string; author?: string },
   root: string = projectRoot(),
 ): ReviewComment {
-  const session = readSession(root);
-  const comment = session.comments.find((item) => item.id === id);
-  if (!comment) throw new Error(`unknown comment: ${id}`);
-  const now = new Date().toISOString();
-  if (patch.status !== undefined) {
-    if (!COMMENT_STATUSES[patch.status]) throw new Error(`unsupported comment status: ${patch.status}`);
-    comment.status = patch.status;
-    comment.resolved = comment.status === "verified" || comment.status === "accepted";
-  }
   if (patch.replyText !== undefined) {
-    const replyText = patch.replyText.trim();
-    if (!replyText || replyText.length > 4000) throw new Error("reply text must be 1–4000 characters");
-    comment.replies = comment.replies ?? [];
-    comment.replies.push({
-      id: `rp-${randomUUID()}`,
-      text: replyText,
-      author: (patch.author ?? "agent").slice(0, 80),
-      createdAt: now,
+    addCommentReply(root, id, {
+      text: patch.replyText,
+      author: patch.author === "agent" ? "agent" : "reviewer",
     });
   }
-  comment.updatedAt = now;
-  writeSession(session, root);
+  if (patch.status !== undefined) {
+    if (!COMMENT_STATUSES[patch.status]) {
+      throw new Error(`unsupported comment status: ${patch.status}`);
+    }
+    const updated = updateRecord(root, "comments", id, {
+      status: patch.status,
+      resolved: RESOLVED_STATUSES[patch.status] === true,
+    });
+    if (!updated) throw new Error(`unknown comment: ${id}`);
+  }
+  const comment = readSession(root).comments.find((item) => item.id === id);
+  if (!comment) throw new Error(`unknown comment: ${id}`);
   return comment;
 }
 
@@ -229,8 +186,6 @@ export const STYLE_PROPERTIES: Record<string, true> = {
   "text-align": true,
 };
 
-const EDIT_KINDS: Record<string, true> = { style: true, text: true, class: true, attribute: true };
-
 export function addEdit(
   input: {
     kind: ReviewEdit["kind"];
@@ -242,40 +197,35 @@ export function addEdit(
   root: string = projectRoot(),
 ): ReviewEdit {
   const session = readSession(root);
-  if (!EDIT_KINDS[input.kind]) throw new Error(`unsupported edit kind: ${input.kind}`);
+  if (input.elementId && !session.elements.some((element) => element.id === input.elementId)) {
+    throw new Error(`unknown element: ${input.elementId}`);
+  }
+  if (input.kind === "style" && !input.property) {
+    throw new Error("style edits need a property");
+  }
+  if (input.kind === "style" && !STYLE_PROPERTIES[input.property as string]) {
+    throw new Error(`style edits must target an allowlisted property: ${input.property}`);
+  }
   const after = String(input.after ?? "").slice(0, 160);
   if (!after) throw new Error("edit value must not be empty");
   if (/[<>]/.test(after) || /url\s*\(|expression\s*\(/i.test(after)) {
     throw new Error("edit value contains unsupported syntax");
   }
-  if (input.kind === "style") {
-    if (!input.property || !STYLE_PROPERTIES[input.property]) {
-      throw new Error(`style edits must target an allowlisted property`);
-    }
-  }
-  if (input.elementId && !session.elements.some((element) => element.id === input.elementId)) {
-    throw new Error(`unknown element: ${input.elementId}`);
-  }
-  const edit: ReviewEdit = {
-    id: `ed-${randomUUID()}`,
+  return storeAddEdit(root, {
+    elementId: input.elementId ?? null,
     kind: input.kind,
     property: input.property,
     before: input.before ?? null,
     after,
-    applied: false,
-    elementId: input.elementId ?? null,
-    createdAt: new Date().toISOString(),
-  };
-  session.edits.push(edit);
-  writeSession(session, root);
-  return edit;
+  }) as ReviewEdit;
 }
 
-export function markEditApplied(id: string, applied: boolean, root: string = projectRoot()): ReviewEdit {
-  const session = readSession(root);
-  const edit = session.edits.find((item) => item.id === id);
-  if (!edit) throw new Error(`unknown edit: ${id}`);
-  edit.applied = applied;
-  writeSession(session, root);
-  return edit;
+export function markEditApplied(
+  id: string,
+  applied: boolean,
+  root: string = projectRoot(),
+): ReviewEdit {
+  const updated = updateRecord(root, "edits", id, { applied });
+  if (!updated) throw new Error(`unknown edit: ${id}`);
+  return updated as ReviewEdit;
 }

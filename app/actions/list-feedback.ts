@@ -33,7 +33,9 @@ export default defineAction({
       comments: comments.map((comment) => ({
         id: comment.id,
         elementId: comment.elementId,
-        selector: comment.anchor?.selector ?? null,
+        // The store keeps the durable anchor on `originalAnchor`; `anchor` is only
+        // set on records that carry a normalized page point.
+        selector: comment.originalAnchor?.selector ?? comment.anchor?.selector ?? null,
         text: comment.text,
         status: comment.status,
         replyCount: comment.replies?.length ?? 0,
@@ -49,7 +51,9 @@ export default defineAction({
         elementId: edit.elementId ?? null,
       })),
       counts: {
-        openComments: comments.filter((comment) => comment.status === "open").length,
+        // Unresolved, not just untouched: the queue lists claimed work too.
+        unresolvedComments: comments.length,
+        unclaimedComments: comments.filter((comment) => comment.status === "open").length,
         pendingEdits: session.edits.filter((edit) => !edit.applied).length,
       },
     };
