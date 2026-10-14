@@ -398,3 +398,41 @@ test('an uninitialized project has no agent-write policy to breach', () => {
   const cwd = tmpProject();
   assert.doesNotThrow(() => assertAgentWritesAllowed(cwd));
 });
+
+test('a patch cannot rewrite the id that everything else points at', () => {
+  // Replies, edits and elements all reference a record by id. Letting a patch
+  // change it orphans them silently, and duplicates break every lookup.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const element = store.upsertElement(cwd, { selector: '.card', tag: 'div', text: 'Card', page: 'http://x/' });
+  const comment = store.addComment(cwd, { elementId: element.id, text: 'spacing', page: null, attachments: [] });
+
+  const patched = store.updateRecord(cwd, 'comments', comment.id, { id: 'cm-HIJACKED', status: 'in_progress' });
+  assert.equal(patched.id, comment.id);
+  assert.equal(patched.status, 'in_progress', 'the rest of the patch must still apply');
+});
+
+test('an unknown collection is a readable error, not a TypeError', () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.throws(
+    () => store.updateRecord(cwd, 'not-a-collection', 'x', {}),
+    (error) => error.message === 'unknown collection: not-a-collection' && !(error instanceof TypeError),
+  );
+});
+
+test('an unrenderable edit kind is refused', () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const element = store.upsertElement(cwd, { selector: '.card', tag: 'div', text: 'Card', page: 'http://x/' });
+  assert.throws(
+    () => store.addEdit(cwd, { elementId: element.id, kind: 'bogus', after: 'x' }),
+    /unsupported edit kind: bogus/,
+  );
+  assert.equal(store.readSession(cwd).edits.length, 0, 'nothing may be written on refusal');
+  // Every kind the preview can produce still works.
+  for (const kind of ['text', 'style', 'class', 'attribute', 'remove']) {
+    store.addEdit(cwd, { elementId: element.id, kind, after: 'x', ...(kind === 'style' ? { property: 'padding' } : {}) });
+  }
+  assert.equal(store.readSession(cwd).edits.length, 5);
+});

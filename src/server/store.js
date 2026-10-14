@@ -235,7 +235,12 @@ export function addCommentReply(cwd, commentId, { text, author = 'reviewer', sou
   });
 }
 
+// The kinds the preview can produce and the dashboard can render. An edit with
+// any other kind is unrenderable, so it is refused rather than persisted.
+const EDIT_KINDS = { text: true, style: true, class: true, attribute: true, remove: true };
+
 export function addEdit(cwd, edit) {
+  if (!edit || !EDIT_KINDS[edit.kind]) throw new Error(`unsupported edit kind: ${edit?.kind ?? '(missing)'}`);
   return withSession(cwd, () => {
   const session = readSession(cwd);
   const record = {
@@ -250,12 +255,21 @@ export function addEdit(cwd, edit) {
   });
 }
 
+// Collections a record can be patched in. An unknown one used to reach the
+// session and throw a TypeError, which the HTTP layer reported as a 500.
+const RECORD_COLLECTIONS = { elements: true, comments: true, edits: true, flows: true, tasks: true, proposals: true, evidence: true };
+
 export function updateRecord(cwd, collection, id, patch) {
+  if (!RECORD_COLLECTIONS[collection]) throw new Error(`unknown collection: ${collection}`);
   return withSession(cwd, () => {
   const session = readSession(cwd);
   const idx = session[collection].findIndex((r) => r.id === id);
   if (idx < 0) return null;
-  session[collection][idx] = { ...session[collection][idx], ...patch, ...(collection === 'comments' && patch.updatedAt === undefined ? { updatedAt: new Date().toISOString() } : {}) };
+  // A patch must never rewrite the id: every reply, edit and element points at
+  // it, so changing it silently orphans them. Dropped, not rejected, so a
+  // round-tripped record can still be sent back unchanged.
+  const { id: _ignoredId, ...safePatch } = patch ?? {};
+  session[collection][idx] = { ...session[collection][idx], ...safePatch, ...(collection === 'comments' && safePatch.updatedAt === undefined ? { updatedAt: new Date().toISOString() } : {}) };
   writeSession(cwd, session);
   return session[collection][idx];
   });
