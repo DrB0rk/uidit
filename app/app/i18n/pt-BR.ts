@@ -1,0 +1,98 @@
+const messages = {
+  composer: {
+    removeAttachment: "Remover {{name}}",
+    removeReference: "Remover referência {{name}}",
+  },
+  settings: {
+    title: "Configurações",
+    workspaceTitle: "Espaço de trabalho",
+    workspaceDescription:
+      "Gerencie membros da equipe, acesso da organização e preferências compartilhadas.",
+    openTeamSettings: "Abrir configurações da equipe",
+    openResourceSettings: "Abrir configurações de recursos",
+    agentTitle: "Gerenciar agente",
+    agentDescription:
+      "Gerencie o modelo do agente, chaves de API, automações, voz e outros controles.",
+    openAgentSettings: "Gerenciar agente",
+  },
+  chat: {
+    archiveChat: "Arquivar chat",
+    archiveFailed: "Falha ao arquivar",
+    chats: "Chats",
+    composerPlaceholder: "Pergunte ao agente...",
+    emptyState: "Pergunte-me qualquer coisa",
+    heroDescription:
+      "Peça ao agente para inspecionar, explicar ou alterar este app.",
+    heroTitle: "Como posso ajudar?",
+    inspectEmptyState: "Pergunte-me qualquer coisa sobre este app",
+    inspectSuggestionAction: "Mostrar ações disponíveis",
+    inspectSuggestionCapabilities: "O que este app pode fazer?",
+    inspectSuggestionHello: "Ajude-me a começar",
+    newChat: "Novo chat",
+    optionsFor: "Opções para",
+    pinChat: "Fixar chat",
+    pinned: "Fixados",
+    recents: "Recentes",
+    retryPreviousRequest:
+      "Tente novamente minha solicitação anterior agora que o provedor do modelo está conectado.",
+    invalidHandoffOptions:
+      "O prompt foi salvo como rascunho, mas não foi possível restaurar as configurações do chat. Revise o prompt, o contexto e o modelo antes de enviá-lo novamente.",
+    recoveryDraftUnsaved:
+      "Estas alterações do rascunho não foram salvas. Se você recarregar este chat, poderá perdê-las.",
+    retryAttachmentUnavailable:
+      "O Chat não consegue reabrir este anexo para tentar novamente. Adicione uma URL de arquivo acessível e tente outra vez.",
+    renameChat: "Renomear chat",
+    renameFailed: "Falha ao renomear",
+    renameThread: "Renomear conversa",
+    suggestionActions: "Mostre-me as ações disponíveis",
+    suggestionCapabilities: "O que este app pode fazer?",
+    suggestionCustomize: "Ajude-me a personalizar este app",
+    unpinChat: "Desafixar chat",
+    untitledChat: "Chat sem título",
+  },
+  home: {
+    communityDescription: "Participe da comunidade Agent-Native",
+    composerPlaceholder: "Chame a ação hello para Alex",
+    communityTitle: "Fale com a gente",
+    docsAddAction: "Adicionar uma ação",
+    docsAddPage: "Adicionar uma página",
+    docsDescription: "Guias sobre ações, páginas e agentes",
+    docsGettingStarted: "Primeiros passos",
+    docsKeyConcepts: "Conceitos principais",
+    docsTitle: "Documentação",
+    editHint:
+      "Edite {{file}}, salve e pergunte de novo para ver a nova saudação.",
+    lead: "A interface do seu app e o agente dele compartilham as mesmas ações.",
+    leadTry: "Peça ao agente para chamar a ação hello.",
+    title: "Comece aqui",
+  },
+  navigation: {
+    chat: "Chat",
+    collapseSidebar: "Recolher barra lateral",
+    database: "Banco de dados",
+    expandSidebar: "Expandir barra lateral",
+    extensions: "Extensões",
+    home: "Início",
+    navigation: "Navegação",
+    navigationDescription: "Navegação principal",
+    observability: "Observabilidade",
+    openNavigation: "Abrir navegação",
+    settings: "Configurações",
+    team: "Equipe",
+  },
+  pages: {
+    databaseTitle: "Banco de dados",
+    observabilityPageTitle: "Observabilidade do agente",
+    teamTitle: "Equipe",
+    teamCreateOrgDescription:
+      "Crie uma organização para convidar colegas e compartilhar este app.",
+  },
+  root: {
+    commandActions: "Ações",
+    commandAppearance: "Aparência",
+    commandSearch: "Pesquisar",
+    toggleTheme: "Alternar tema",
+  },
+};
+
+export default messages;

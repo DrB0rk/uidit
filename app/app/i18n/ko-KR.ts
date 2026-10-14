@@ -1,0 +1,97 @@
+const messages = {
+  composer: {
+    removeAttachment: "{{name}} 제거",
+    removeReference: "{{name}} 참조 제거",
+  },
+  settings: {
+    title: "설정",
+    workspaceTitle: "워크스페이스",
+    workspaceDescription:
+      "팀원, 조직 접근 권한, 공유 워크스페이스 환경설정을 관리합니다.",
+    openTeamSettings: "팀 설정 열기",
+    openResourceSettings: "리소스 설정 열기",
+    agentTitle: "에이전트 관리",
+    agentDescription:
+      "에이전트의 모델, API 키, 자동화, 음성 및 기타 제어를 관리합니다.",
+    openAgentSettings: "에이전트 관리",
+  },
+  chat: {
+    archiveChat: "채팅 보관",
+    archiveFailed: "보관 실패",
+    chats: "채팅",
+    composerPlaceholder: "에이전트에게 물어보세요...",
+    emptyState: "무엇이든 물어보세요",
+    heroDescription:
+      "에이전트에게 이 앱을 살펴보고 설명하거나 변경하도록 요청하세요.",
+    heroTitle: "무엇을 도와드릴까요?",
+    inspectEmptyState: "이 앱에 대해 무엇이든 물어보세요",
+    inspectSuggestionAction: "사용 가능한 작업 보기",
+    inspectSuggestionCapabilities: "이 앱은 무엇을 할 수 있나요?",
+    inspectSuggestionHello: "시작할 수 있게 도와주세요",
+    newChat: "새 채팅",
+    optionsFor: "옵션 대상",
+    pinChat: "채팅 고정",
+    pinned: "고정됨",
+    recents: "최근",
+    retryPreviousRequest:
+      "모델 공급자가 연결되었으니 이전 요청을 다시 시도해 주세요.",
+    invalidHandoffOptions:
+      "프롬프트는 초안으로 저장했지만 채팅 설정을 복원하지 못했습니다. 다시 보내기 전에 프롬프트, 컨텍스트, 모델을 확인하세요.",
+    recoveryDraftUnsaved:
+      "초안 변경 사항이 저장되지 않았습니다. 이 채팅을 새로 고치면 변경 사항이 사라질 수 있습니다.",
+    retryAttachmentUnavailable:
+      "Chat에서 이 첨부 파일을 다시 열어 재시도할 수 없습니다. 접근 가능한 파일 URL을 추가한 뒤 다시 시도하세요.",
+    renameChat: "채팅 이름 바꾸기",
+    renameFailed: "이름 변경 실패",
+    renameThread: "스레드 이름 바꾸기",
+    suggestionActions: "사용 가능한 작업을 보여줘",
+    suggestionCapabilities: "이 앱은 무엇을 할 수 있나요?",
+    suggestionCustomize: "이 앱을 맞춤 설정하도록 도와줘",
+    unpinChat: "채팅 고정 해제",
+    untitledChat: "제목 없는 채팅",
+  },
+  home: {
+    communityDescription: "Agent-Native 커뮤니티에 참여하세요",
+    composerPlaceholder: "Alex에 대해 hello 작업을 호출해 줘",
+    communityTitle: "함께하기",
+    docsAddAction: "작업 추가",
+    docsAddPage: "페이지 추가",
+    docsDescription: "작업, 페이지, 에이전트 가이드",
+    docsGettingStarted: "시작하기",
+    docsKeyConcepts: "핵심 개념",
+    docsTitle: "문서",
+    editHint:
+      "{{file}} 파일을 수정하고 저장한 다음 다시 요청하면 새 인사말이 보입니다.",
+    lead: "앱의 UI와 에이전트는 같은 작업을 공유합니다.",
+    leadTry: "에이전트에게 hello 작업을 호출해 달라고 요청해 보세요.",
+    title: "시작하기",
+  },
+  navigation: {
+    chat: "채팅",
+    collapseSidebar: "사이드바 접기",
+    database: "데이터베이스",
+    expandSidebar: "사이드바 펼치기",
+    extensions: "확장 프로그램",
+    home: "홈",
+    navigation: "탐색",
+    navigationDescription: "기본 탐색",
+    observability: "관찰성",
+    openNavigation: "탐색 열기",
+    settings: "설정",
+    team: "팀",
+  },
+  pages: {
+    databaseTitle: "데이터베이스",
+    observabilityPageTitle: "에이전트 관찰성",
+    teamTitle: "팀",
+    teamCreateOrgDescription: "팀원을 초대하고 이 앱을 공유할 조직을 만드세요.",
+  },
+  root: {
+    commandActions: "작업",
+    commandAppearance: "화면 표시",
+    commandSearch: "검색",
+    toggleTheme: "테마 전환",
+  },
+};
+
+export default messages;
