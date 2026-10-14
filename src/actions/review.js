@@ -28,10 +28,13 @@ export const reviewActions = {
   'reply-comment': {
     description: 'Append a reply to an existing review comment thread.',
     run: (cwd, input) => {
+      // The reviewer writes from the dashboard, an agent writes through MCP;
+      // the thread shows who said what, so identity travels with the call.
+      const author = input.author === 'agent' ? 'agent' : 'reviewer';
       const result = store.addCommentReply(cwd, input.commentId, {
         text: input.text,
-        author: 'reviewer',
-        source: 'reviewer',
+        author,
+        source: input.source ?? author,
       });
       // A null result means the comment is gone; the caller reports that as 404
       // rather than inventing an empty success.
