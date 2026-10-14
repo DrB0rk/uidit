@@ -436,3 +436,35 @@ test('an unrenderable edit kind is refused', () => {
   }
   assert.equal(store.readSession(cwd).edits.length, 5);
 });
+
+test('the work queue keys on the resolved flag, not the status', () => {
+  // A comment resolved from the CLI keeps status "open", so filtering on status
+  // offered closed feedback as new work. This is the rule every surface shares.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const open = store.addComment(cwd, { text: 'still open', page: null, attachments: [] });
+  const closed = store.addComment(cwd, { text: 'handled', page: null, attachments: [] });
+  store.updateRecord(cwd, 'comments', closed.id, { resolved: true });
+  assert.equal(store.readSession(cwd).comments.find((c) => c.id === closed.id).status, 'open', 'the trap this guards against');
+
+  const session = store.readSession(cwd);
+  assert.deepEqual(store.selectComments(session).map((c) => c.id), [open.id], 'default is the open queue');
+  assert.deepEqual(store.selectComments(session, true).map((c) => c.id), [closed.id], 'resolved: true is completed work');
+  assert.deepEqual(store.selectComments(session, false).map((c) => c.id), [open.id], 'resolved: false matches the default');
+  assert.equal(store.selectComments(session, true).length + store.selectComments(session, false).length, 2, 'the two halves cover the session');
+});
+
+test('comment text is bounded where both surfaces write', () => {
+  // The dashboard and the agent tool schema both advertise 4000 characters, but
+  // nothing enforced it at the store. One 2MB comment reached session.json --
+  // 2MB that every later read parses and every SSE client receives.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.throws(() => store.addComment(cwd, { text: 'x'.repeat(4001), page: null, attachments: [] }), /4000 characters or fewer/);
+  assert.throws(() => store.addComment(cwd, { text: '   ', page: null, attachments: [] }), /1–4000 characters/);
+  assert.throws(() => store.addComment(cwd, { page: null, attachments: [] }), /1–4000 characters/);
+  assert.equal(store.readSession(cwd).comments.length, 0, 'nothing may be written on refusal');
+
+  store.addComment(cwd, { text: 'x'.repeat(4000), page: null, attachments: [] });
+  assert.equal(store.readSession(cwd).comments.length, 1, 'the documented maximum must still be accepted');
+});

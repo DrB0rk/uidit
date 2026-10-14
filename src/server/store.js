@@ -172,7 +172,31 @@ export function upsertElement(cwd, element) {
   });
 }
 
+/**
+ * Select comments for the review work queue.
+ *
+ * `resolved` is the store's completion flag and the one every surface keys on,
+ * but a comment resolved from the CLI keeps `status: "open"`, so a reader that
+ * filters on status keeps offering closed work. Omitted means the open queue;
+ * true means completed work.
+ *
+ * Exported as a seam so the rule is testable without spinning up the MCP server.
+ */
+export function selectComments(session, resolved) {
+  return session.comments.filter((comment) => (resolved === undefined ? !comment.resolved : Boolean(comment.resolved) === resolved));
+}
+
+/// Bounded free text, matching what the dashboard and the agent tool schema send.
+const MAX_TEXT = 4000;
+
 export function addComment(cwd, comment) {
+  // The store is the boundary both surfaces write through, so the length the
+  // route and the tool schema advertise has to be enforced here. Without it a
+  // single request could store megabytes of text, which every later read parses
+  // and every SSE client receives.
+  const text = typeof comment?.text === 'string' ? comment.text : '';
+  if (!text.trim()) throw new Error('comment text must be 1–4000 characters');
+  if (text.length > MAX_TEXT) throw new Error(`comment text must be ${MAX_TEXT} characters or fewer`);
   return withSession(cwd, () => {
   const session = readSession(cwd);
   const linkedElement = session.elements.find((element) => element.id === comment.elementId);

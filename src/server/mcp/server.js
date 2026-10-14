@@ -191,11 +191,7 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
   server.registerTool('uidit_list_feedback', { description: 'List review feedback. Defaults to the open queue (unresolved only); pass resolved: true for completed work. Includes replies, code references, progress status, linked element context, markers, and visual drawing instructions. Drawing points are normalized page coordinates; arrows run from first point to last.', inputSchema: { resolved: z.boolean().optional(), page: z.string().max(2000).optional(), elementId: z.string().max(200).optional(), query: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } }, async ({ resolved, page, elementId, query, offset = 0, limit = 50 }) => {
     const session = store.readSession(cwd);
     const elements = new Map(session.elements.map((element) => [element.id, element]));
-    // The default is the work queue, matching the contract in .uidit/README.md and the
-    // dashboard: resolved: true asks for completed work, false or omitted for what is
-    // still open. Returning everything by default made an agent keep working on
-    // feedback the reviewer had already closed.
-    const all = session.comments.filter((c) => resolved === undefined ? !c.resolved : Boolean(c.resolved) === resolved).filter((c) => !page || c.page === page).filter((c) => !elementId || c.elementId === elementId).filter((c) => {
+    const all = store.selectComments(session, resolved).filter((c) => !page || c.page === page).filter((c) => !elementId || c.elementId === elementId).filter((c) => {
       const element = elements.get(c.elementId);
       return !query || [c.text, element?.selector, element?.accessibleName, element?.nearbyText, element?.component?.name, ...(c.codeRefs ?? []).map((reference) => reference.file), ...(c.replies ?? []).map((reply) => reply.text)].some((value) => String(value ?? '').toLowerCase().includes(query.toLowerCase()));
     });
