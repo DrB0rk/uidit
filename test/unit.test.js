@@ -15,6 +15,7 @@ import { auditBrowserContext } from '../src/server/audit.js';
 import { exportFlowAsPlaywright } from '../src/server/flow-export.js';
 import { createServiceManager } from '../src/server/process-manager.js';
 import { createSelectiveVerifier } from '../src/server/verification.js';
+import { describeReviewActions, runReviewAction } from '../src/actions/review.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -328,4 +329,52 @@ test('withSession releases the lock when the update throws', () => {
   assert.throws(() => store.withSession(cwd, () => { throw new Error('boom'); }), /boom/);
   assert.equal(fs.existsSync(path.join(cwd, '.uidit', 'session.lock')), false);
   assert.equal(store.withSession(cwd, () => 'recovered'), 'recovered');
+});
+
+test('the review registry exposes every operation the dashboard calls', () => {
+  const names = describeReviewActions().map((action) => action.name);
+  for (const expected of ['tag-element', 'add-comment', 'reply-comment', 'add-edit', 'update-record']) {
+    assert.ok(names.includes(expected), `missing review action: ${expected}`);
+  }
+  for (const action of describeReviewActions()) {
+    assert.ok(action.description && action.description.length > 20, `${action.name} needs a description an agent can choose on`);
+  }
+});
+
+test('an unknown review action fails loudly', () => {
+  assert.throws(() => runReviewAction('not-an-action', tmpProject(), {}), /unknown review action/);
+});
+
+test('reply attribution follows the caller, not the dashboard', () => {
+  // Routing the agent's reply through a registry that assumed "reviewer" put an
+  // agent's words in the user's mouth. Identity must travel with the call.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const comment = runReviewAction('add-comment', cwd, { text: 'spacing', elementId: null }).comment;
+  runReviewAction('reply-comment', cwd, { commentId: comment.id, text: 'reviewer says' });
+  runReviewAction('reply-comment', cwd, { commentId: comment.id, text: 'agent says', author: 'agent' });
+
+  const replies = store.readSession(cwd).comments.find((item) => item.id === comment.id).replies;
+  assert.deepEqual(replies.map((reply) => reply.author), ['reviewer', 'agent']);
+});
+
+test('actions report "nothing to act on" instead of inventing a result', () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.equal(runReviewAction('reply-comment', cwd, { commentId: 'cm-missing', text: 'hi' }), null);
+  assert.equal(runReviewAction('update-record', cwd, { collection: 'comments', id: 'cm-missing', patch: {} }), null);
+});
+
+test('every registry write reaches the session it was given', () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const element = runReviewAction('tag-element', cwd, { selector: '.card', tag: 'div', text: 'Card', page: 'http://x/' }).element;
+  const edit = runReviewAction('add-edit', cwd, { elementId: element.id, kind: 'style', property: 'padding', before: '12px', after: '16px' }).edit;
+  assert.equal(edit.applied, false);
+  const updated = runReviewAction('update-record', cwd, { collection: 'edits', id: edit.id, patch: { applied: true } }).record;
+
+  const session = store.readSession(cwd);
+  assert.equal(session.elements.length, 1);
+  assert.equal(session.edits[0].applied, true);
+  assert.equal(updated.before, '12px');
 });
