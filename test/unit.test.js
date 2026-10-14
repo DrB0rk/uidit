@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { spawn } from 'node:child_process';
 import * as store from '../src/server/store.js';
 import { injectIntoHtml } from '../src/server/server.js';
 import { triageFeedback } from '../src/server/triage.js';
@@ -294,4 +295,37 @@ test('html injection puts the overlay first in head and exposes the target origi
 test('html injection works without a head element', () => {
   const html = injectIntoHtml('<div>bare</div>', 'http://x');
   assert.match(html, /overlay\.js/);
+});
+
+test('concurrent writers never discard each other\'s records', async () => {
+  // The overlay and an agent are separate processes doing read-modify-write on
+  // one file. Without the session lock the second write silently drops the
+  // first writer's comment -- the user's feedback is lost.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const element = store.upsertElement(cwd, { selector: '.card', tag: 'div', text: 'Card', page: 'http://x/' }).id;
+  const storeUrl = new URL('../src/server/store.js', import.meta.url).href;
+  const rounds = 25;
+  const worker = (tag) => `
+    const store = await import(${JSON.stringify(storeUrl)});
+    for (let i = 0; i < ${rounds}; i++) {
+      store.addComment(${JSON.stringify(cwd)}, { elementId: ${JSON.stringify(element)}, text: ${JSON.stringify(tag)}, page: null, attachments: [] });
+    }
+  `;
+  const run = (tag) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', worker(tag)], { stdio: 'ignore' });
+    child.on('exit', resolve);
+  });
+  await Promise.all([run('A'), run('B')]);
+  const comments = store.readSession(cwd).comments;
+  assert.equal(comments.filter((comment) => comment.text === 'A').length, rounds);
+  assert.equal(comments.filter((comment) => comment.text === 'B').length, rounds);
+});
+
+test('withSession releases the lock when the update throws', () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.throws(() => store.withSession(cwd, () => { throw new Error('boom'); }), /boom/);
+  assert.equal(fs.existsSync(path.join(cwd, '.uidit', 'session.lock')), false);
+  assert.equal(store.withSession(cwd, () => 'recovered'), 'recovered');
 });

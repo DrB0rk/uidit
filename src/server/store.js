@@ -25,6 +25,51 @@ function writeAtomic(file, contents) {
   fs.renameSync(tmp, file);
 }
 
+const LOCK_STALE_MS = 10_000;
+
+// Every mutation is read-modify-write on one JSON file. The overlay and an
+// agent are separate processes, so two writers can read the same snapshot and
+// the second write discards the first -- losing a comment the user made.
+// `withSession` serialises them with an O_EXCL lockfile. It stays synchronous
+// because every caller (server handlers, the CLI, the MCP bridge) is sync.
+export function withSession(cwd, update) {
+  const file = path.join(uiditDir(cwd), 'session.lock');
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const held = `${JSON.stringify({ pid: process.pid, at: Date.now() })}\n`;
+  let heldLock = false;
+  for (let attempt = 0; attempt < 600; attempt++) {
+    // Publish owner metadata and the lock in one step. Creating the lockfile
+    // empty and writing into it leaves a window where a contender reads no
+    // owner and treats the live lock as stale.
+    const staged = `${file}.${process.pid}.${attempt}.tmp`;
+    try {
+      fs.writeFileSync(staged, held, { mode: 0o600 });
+      fs.linkSync(staged, file);
+      heldLock = true;
+      break;
+    } catch (error) {
+      try { fs.unlinkSync(staged); } catch {}
+      if (error.code !== 'EEXIST') throw error;
+    }
+    let owner = null;
+    try { owner = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    // An unreadable lock is held, not stale: stealing it would resurrect the
+    // race this lock exists to close.
+    if (owner && Number.isFinite(owner.at) && Date.now() - owner.at > LOCK_STALE_MS) {
+      try { fs.unlinkSync(file); } catch {}
+      continue;
+    }
+    // Block briefly rather than spin the CPU; the holder is doing file I/O.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+  }
+  if (!heldLock) throw new Error('Could not acquire the session lock; another UIDIT writer is active');
+  try {
+    return update();
+  } finally {
+    try { fs.unlinkSync(file); } catch {}
+  }
+}
+
 export function init(cwd = process.cwd(), { force = false } = {}) {
   const dir = uiditDir(cwd);
   const configFile = path.join(dir, 'config.json');
@@ -112,6 +157,7 @@ export function stableId(prefix, selector) {
 }
 
 export function upsertElement(cwd, element) {
+  return withSession(cwd, () => {
   const session = readSession(cwd);
   const anchor = anchorFor(element);
   const routeKey = anchor.route;
@@ -123,9 +169,11 @@ export function upsertElement(cwd, element) {
   else session.elements.push(record);
   writeSession(cwd, session);
   return record;
+  });
 }
 
 export function addComment(cwd, comment) {
+  return withSession(cwd, () => {
   const session = readSession(cwd);
   const linkedElement = session.elements.find((element) => element.id === comment.elementId);
   const attachments = Array.isArray(comment.attachments) ? comment.attachments : [];
@@ -152,6 +200,7 @@ export function addComment(cwd, comment) {
   session.comments.push(record);
   writeSession(cwd, session);
   return record;
+  });
 }
 
 export function normalizeCodeReference(reference) {
@@ -164,9 +213,16 @@ export function normalizeCodeReference(reference) {
   return { file, startLine, endLine };
 }
 
+/**
+ * Append a reply to an existing comment.
+ * @param {string} cwd
+ * @param {string} commentId
+ * @param {{ text: string, author?: 'reviewer'|'agent', source?: string, displayName?: string }} [reply]
+ */
 export function addCommentReply(cwd, commentId, { text, author = 'reviewer', source, displayName } = {}) {
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('reply text must be 1–4000 characters');
   if (!['reviewer', 'agent'].includes(author)) throw new Error('reply author must be reviewer or agent');
+  return withSession(cwd, () => {
   const session = readSession(cwd);
   const comment = session.comments.find((item) => item.id === commentId);
   if (!comment) return null;
@@ -176,9 +232,11 @@ export function addCommentReply(cwd, commentId, { text, author = 'reviewer', sou
   comment.updatedAt = reply.createdAt;
   writeSession(cwd, session);
   return { comment, reply };
+  });
 }
 
 export function addEdit(cwd, edit) {
+  return withSession(cwd, () => {
   const session = readSession(cwd);
   const record = {
     id: edit.id ?? stableId('ed', `${Date.now()}:${Math.random()}`),
@@ -189,15 +247,18 @@ export function addEdit(cwd, edit) {
   session.edits.push(record);
   writeSession(cwd, session);
   return record;
+  });
 }
 
 export function updateRecord(cwd, collection, id, patch) {
+  return withSession(cwd, () => {
   const session = readSession(cwd);
   const idx = session[collection].findIndex((r) => r.id === id);
   if (idx < 0) return null;
   session[collection][idx] = { ...session[collection][idx], ...patch, ...(collection === 'comments' && patch.updatedAt === undefined ? { updatedAt: new Date().toISOString() } : {}) };
   writeSession(cwd, session);
   return session[collection][idx];
+  });
 }
 
 export function reattachComment(cwd, commentId, elementId) {

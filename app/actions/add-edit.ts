@@ -1,7 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { addEdit } from "../shared/uidit/session.js";
+import { addEdit, assertAgentWritesAllowed } from "../shared/uidit/session.js";
 
 const STYLE_PROPERTIES = [
   "padding",
@@ -42,7 +42,12 @@ export default defineAction({
       .describe("Required when kind is style; must be one of the allowlisted CSS properties."),
     before: z.string().max(160).optional().describe("Observed previous value, for the before → after record."),
   }),
-  run: async ({ elementId, kind, after, property, before }) => {
+  run: async ({ elementId, kind, after, property, before }, ctx) => {
+    try {
+      assertAgentWritesAllowed(ctx?.caller);
+    } catch (error) {
+      throw fail((error as Error).message, { errorCode: "agent_writes_disabled", statusCode: 403 });
+    }
     if (kind === "style" && !property) {
       throw fail("style edits need a property", { errorCode: "missing_property", statusCode: 400 });
     }

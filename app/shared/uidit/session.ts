@@ -4,8 +4,7 @@ import path from "node:path";
 // UIDIT already owns session semantics (v1→v2 migration, status normalization,
 // anchor fallback, atomic writes). This module is a typed entry point to that one
 // implementation -- it must never grow a second copy of those rules.
-// @ts-expect-error -- the store is plain JavaScript outside this package.
-import { addComment as storeAddComment, addCommentReply, addEdit as storeAddEdit, readSession as storeReadSession, updateRecord } from "../../../src/server/store.js";
+import { addComment as storeAddComment, addCommentReply, addEdit as storeAddEdit, readConfig as storeReadConfig, readSession as storeReadSession, updateRecord } from "../../../src/server/store.js";
 
 export const UIDIT_DIR = ".uidit";
 
@@ -123,6 +122,29 @@ export function projectRoot(): string {
 
 export function readSession(root: string = projectRoot()): ReviewSession {
   return storeReadSession(root) as ReviewSession;
+}
+
+// `mcp.allowAgentWrites` is the project's existing opt-in for letting an agent
+// change the review session, and the MCP bridge already enforces it. The
+// reviewer driving the dashboard is not an agent, so only agent callers are
+// gated -- otherwise disabling agent writes would disable the UI too.
+const AGENT_CALLERS: Record<string, true> = {
+  tool: true,
+  mcp: true,
+  "mcp-widget-write": true,
+  a2a: true,
+  automation: true,
+  http: true,
+  cli: true,
+};
+
+export function assertAgentWritesAllowed(caller?: string, root: string = projectRoot()): void {
+  if (caller && !AGENT_CALLERS[caller]) return;
+  const config = storeReadConfig(root) as { mcp?: { allowAgentWrites?: boolean } } | null;
+  // No config means no UIDIT project is initialized here; nothing to honour.
+  if (config && !config.mcp?.allowAgentWrites) {
+    throw new Error("Agent writes are disabled in .uidit/config.json");
+  }
 }
 
 export function addComment(

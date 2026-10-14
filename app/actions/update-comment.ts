@@ -1,7 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { updateComment } from "../shared/uidit/session.js";
+import { assertAgentWritesAllowed, updateComment } from "../shared/uidit/session.js";
 
 export default defineAction({
   description:
@@ -26,7 +26,12 @@ export default defineAction({
     replyText: z.string().min(1).max(4000).optional().describe("Reply to append to the comment thread."),
     author: z.string().max(80).default("agent").describe('Author of the reply, e.g. "agent".'),
   }),
-  run: async ({ commentId, status, replyText, author }) => {
+  run: async ({ commentId, status, replyText, author }, ctx) => {
+    try {
+      assertAgentWritesAllowed(ctx?.caller);
+    } catch (error) {
+      throw fail((error as Error).message, { errorCode: "agent_writes_disabled", statusCode: 403 });
+    }
     if (status === undefined && replyText === undefined) {
       throw fail("provide a status or a replyText", { errorCode: "no_change", statusCode: 400 });
     }

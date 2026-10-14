@@ -1,7 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { addComment } from "../shared/uidit/session.js";
+import { addComment, assertAgentWritesAllowed } from "../shared/uidit/session.js";
 
 export default defineAction({
   description:
@@ -14,8 +14,9 @@ export default defineAction({
       .describe("Element id from list-feedback; omit for a whole-page comment."),
     author: z.string().max(80).default("agent").describe('Who is leaving the comment, e.g. "agent".'),
   }),
-  run: async ({ text, elementId, author }) => {
+  run: async ({ text, elementId, author }, ctx) => {
     try {
+      assertAgentWritesAllowed(ctx?.caller);
       const comment = addComment({ text, elementId: elementId ?? null, author });
       return {
         id: comment.id,
@@ -25,7 +26,12 @@ export default defineAction({
         nextRequiredAction: "list-feedback",
       };
     } catch (error) {
-      throw fail((error as Error).message, { errorCode: "comment_rejected", statusCode: 400 });
+      throw fail((error as Error).message, {
+        errorCode: (error as Error).message.includes("disabled in .uidit/config.json")
+          ? "agent_writes_disabled"
+          : "comment_rejected",
+        statusCode: (error as Error).message.includes("disabled in .uidit/config.json") ? 403 : 400,
+      });
     }
   },
 });

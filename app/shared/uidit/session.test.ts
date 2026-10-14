@@ -3,10 +3,22 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// @ts-expect-error -- the store is plain JavaScript outside this package.
-import { init as storeInit, readSession as legacyReadSession, updateRecord, upsertElement } from "../../../src/server/store.js";
+import {
+  init as storeInit,
+  readSession as legacyReadSession,
+  updateRecord,
+  upsertElement,
+  writeConfig as storeWriteConfig,
+} from "../../../src/server/store.js";
 import listFeedback from "../../actions/list-feedback.js";
-import { addComment, addEdit, markEditApplied, readSession, updateComment } from "./session.js";
+import {
+  addComment,
+  addEdit,
+  assertAgentWritesAllowed,
+  markEditApplied,
+  readSession,
+  updateComment,
+} from "./session.js";
 
 let root: string;
 
@@ -75,6 +87,20 @@ describe("review session invariants", () => {
     const edit = addEdit({ elementId, kind: "text", after: "Pay now" }, root);
     expect(readSession(root).edits[0].applied).toBe(false);
     expect(markEditApplied(edit.id, true, root).applied).toBe(true);
+  });
+
+  it("refuses agent writes when mcp.allowAgentWrites is off, but not the reviewer UI", () => {
+    storeWriteConfig(root, { mcp: { allowAgentWrites: false } });
+    for (const caller of ["tool", "mcp", "a2a", "cli", "http", undefined]) {
+      expect(() => assertAgentWritesAllowed(caller, root)).toThrow(/disabled/);
+    }
+    // The reviewer driving the dashboard is not an agent.
+    expect(() => assertAgentWritesAllowed("frontend", root)).not.toThrow();
+  });
+
+  it("allows agent writes once the project opts in", () => {
+    storeWriteConfig(root, { mcp: { allowAgentWrites: true } });
+    expect(() => assertAgentWritesAllowed("tool", root)).not.toThrow();
   });
 
   it("keeps a CLI-resolved comment out of the queue", async () => {

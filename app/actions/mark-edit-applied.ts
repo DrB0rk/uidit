@@ -2,7 +2,7 @@ import { defineAction, fail } from "@agent-native/core/action";
 import type { WriteReceipt } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { markEditApplied } from "../shared/uidit/session.js";
+import { assertAgentWritesAllowed, markEditApplied } from "../shared/uidit/session.js";
 
 export default defineAction({
   description:
@@ -11,8 +11,9 @@ export default defineAction({
     editId: z.string().min(1).describe("Edit id from list-feedback."),
     applied: z.boolean().describe("True when the edit is committed in source."),
   }),
-  run: async ({ editId, applied }) => {
+  run: async ({ editId, applied }, ctx) => {
     try {
+      assertAgentWritesAllowed(ctx?.caller);
       const edit = markEditApplied(editId, applied);
       const _receipt: WriteReceipt = {
         changed: true,
@@ -24,7 +25,12 @@ export default defineAction({
       };
       return { id: edit.id, applied: edit.applied, _receipt };
     } catch (error) {
-      throw fail((error as Error).message, { errorCode: "edit_not_found", statusCode: 404 });
+      throw fail((error as Error).message, {
+        errorCode: (error as Error).message.includes("disabled in .uidit/config.json")
+          ? "agent_writes_disabled"
+          : "edit_not_found",
+        statusCode: (error as Error).message.includes("disabled in .uidit/config.json") ? 403 : 404,
+      });
     }
   },
 });
