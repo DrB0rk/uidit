@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // UIDIT already owns session semantics (v1→v2 migration, status normalization,
 // anchor fallback, atomic writes). This module is a typed entry point to that one
@@ -79,6 +78,15 @@ const RESOLVED_STATUSES: Record<string, true> = {
   accepted: true,
 };
 
+/**
+ * A comment is done when the store says so, whichever way it was marked:
+ * `resolved` is set by `uidit resolve` and by the review UI, while the
+ * verified/accepted statuses mean the same thing to a reviewer.
+ */
+export function isResolved(comment: ReviewComment): boolean {
+  return comment.resolved === true || RESOLVED_STATUSES[comment.status] === true;
+}
+
 // The store coerces an unknown status back to "open" on the next read, which
 // would silently discard the caller's intent. Reject it here instead.
 const COMMENT_STATUSES: Record<string, true> = {
@@ -95,23 +103,22 @@ const COMMENT_STATUSES: Record<string, true> = {
   cancelled: true,
 };
 
-/** Nearest ancestor directory (from this app's location) holding an initialized `.uidit`. */
+/**
+ * Nearest ancestor directory holding an initialized `.uidit`.
+ *
+ * Anchored on the process working directory rather than this module's location:
+ * `import.meta.dirname` is undefined in some bundled output, and the cwd is
+ * what an operator means by "this project" anyway.
+ */
 export function projectRoot(): string {
-  let dir = appDir();
+  let dir = process.cwd();
   for (;;) {
     if (fs.existsSync(path.join(dir, UIDIT_DIR, "config.json"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return appDir();
-}
-
-function appDir(): string {
-  // `import.meta.dirname` is Node 20.11+ but is undefined in some bundled output,
-  // where only the URL is reliable.
-  const fromUrl = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(fromUrl, "..", "..");
+  return process.cwd();
 }
 
 export function readSession(root: string = projectRoot()): ReviewSession {
@@ -153,6 +160,7 @@ export function updateComment(
     }
     const updated = updateRecord(root, "comments", id, {
       status: patch.status,
+      // Reopening must clear the flag, or the comment stays done for the queue.
       resolved: RESOLVED_STATUSES[patch.status] === true,
     });
     if (!updated) throw new Error(`unknown comment: ${id}`);

@@ -1,7 +1,7 @@
 import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { readSession } from "../shared/uidit/session.js";
+import { isResolved, readSession } from "../shared/uidit/session.js";
 
 export default defineAction({
   description:
@@ -10,15 +10,17 @@ export default defineAction({
     includeResolved: z
       .boolean()
       .default(false)
-      .describe("Include resolved comments; defaults to false (the open queue only)."),
+      .describe("Include resolved comments; defaults to false (the unresolved queue only)."),
   }),
   http: { method: "GET" },
   readOnly: true,
   run: async ({ includeResolved }) => {
     const session = readSession();
-    const comments = session.comments.filter((comment) =>
-      includeResolved ? true : comment.status !== "verified" && comment.status !== "accepted",
-    );
+    // `resolved` is the store's completion flag: `uidit resolve` sets only that,
+    // so filtering on status alone still surfaces CLI-resolved comments. A
+    // verified/accepted status counts as resolved too.
+    const comments = session.comments.filter((comment) => includeResolved || !isResolved(comment));
+    const unresolved = comments.filter((comment) => !isResolved(comment));
     return {
       revision: session.revision,
       updatedAt: session.updatedAt,
@@ -38,6 +40,7 @@ export default defineAction({
         selector: comment.originalAnchor?.selector ?? comment.anchor?.selector ?? null,
         text: comment.text,
         status: comment.status,
+        resolved: isResolved(comment),
         replyCount: comment.replies?.length ?? 0,
         createdAt: comment.createdAt,
       })),
@@ -52,8 +55,8 @@ export default defineAction({
       })),
       counts: {
         // Unresolved, not just untouched: the queue lists claimed work too.
-        unresolvedComments: comments.length,
-        unclaimedComments: comments.filter((comment) => comment.status === "open").length,
+        unresolvedComments: unresolved.length,
+        unclaimedComments: unresolved.filter((comment) => comment.status === "open").length,
         pendingEdits: session.edits.filter((edit) => !edit.applied).length,
       },
     };

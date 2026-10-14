@@ -4,17 +4,24 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error -- the store is plain JavaScript outside this package.
-import { init as storeInit, readSession as legacyReadSession, upsertElement } from "../../../src/server/store.js";
+import { init as storeInit, readSession as legacyReadSession, updateRecord, upsertElement } from "../../../src/server/store.js";
+import listFeedback from "../../actions/list-feedback.js";
 import { addComment, addEdit, markEditApplied, readSession, updateComment } from "./session.js";
 
 let root: string;
 
+let cwd: string;
+
 beforeEach(() => {
+  cwd = process.cwd();
   root = fs.mkdtempSync(path.join(os.tmpdir(), "uidit-session-"));
   storeInit(root, { force: true });
+  // Actions resolve the project root from the working directory.
+  process.chdir(root);
 });
 
 afterEach(() => {
+  process.chdir(cwd);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -70,12 +77,30 @@ describe("review session invariants", () => {
     expect(markEditApplied(edit.id, true, root).applied).toBe(true);
   });
 
-  it("exposes the element selector for an element-bound comment", () => {
+  it("keeps a CLI-resolved comment out of the queue", async () => {
+    const elementId = seedElement();
+    const comment = addComment({ text: "resolve me from the CLI", elementId }, root);
+    // `uidit resolve` sets only this flag and leaves status at "open".
+    updateRecord(root, "comments", comment.id, { resolved: true });
+
+    const open = await listFeedback.run({});
+    expect(open.comments.map((item: { id: string }) => item.id)).not.toContain(comment.id);
+    expect(open.counts.unresolvedComments).toBe(0);
+
+    const all = await listFeedback.run({ includeResolved: true });
+    expect(all.comments.map((item: { id: string }) => item.id)).toContain(comment.id);
+    expect(all.comments.find((item: { id: string }) => item.id === comment.id)?.resolved).toBe(true);
+  });
+
+  it("exposes the element selector for an element-bound comment", async () => {
     const elementId = seedElement();
     const comment = addComment({ text: "bound", elementId }, root);
     // The store records the durable anchor on `originalAnchor`.
     expect(readSession(root).comments[0].originalAnchor?.selector).toBe(".cart > .card");
     expect(readSession(root).comments.find((item) => item.id === comment.id)?.anchor).toBeUndefined();
+
+    const feedback = await listFeedback.run({});
+    expect(feedback.comments[0].selector).toBe(".cart > .card");
   });
 
   it("stays readable by the existing store, with anchors the overlay can score", () => {

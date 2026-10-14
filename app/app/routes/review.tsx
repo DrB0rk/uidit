@@ -75,12 +75,16 @@ export default function ReviewRoute() {
           </p>
         ) : (
           data?.comments.map((comment) => {
-            const resolved = comment.status === "verified" || comment.status === "accepted";
+            const resolved = comment.resolved;
             return (
               <Card key={comment.id}>
                 <CardContent className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <Badge variant={resolved ? "secondary" : "outline"}>{comment.status}</Badge>
+                    {/* `status` stays "open" for a comment the CLI resolved, so completion
+                    must read the store's flag, not the status. */}
+                    <Badge variant={resolved ? "secondary" : "outline"}>
+                      {resolved ? "resolved" : comment.status}
+                    </Badge>
                     <span className="text-xs text-muted-foreground">{relative(comment.createdAt)}</span>
                     {comment.replyCount > 0 ? (
                       <span className="text-xs text-muted-foreground">
