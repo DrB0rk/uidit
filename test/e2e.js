@@ -12,6 +12,10 @@ const UIDIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURE_PORT = 4602;
 const { chromium } = await import('playwright');
 const BROWSER_PATH = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+// Set E2E_CDP_URL to drive an existing browser instead of launching one. Moli is
+// a CDP server rather than a Chromium-compatible executable, so it is reached
+// this way -- `moli serve --port 9474` then E2E_CDP_URL=http://127.0.0.1:9474.
+const CDP_URL = process.env.E2E_CDP_URL;
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 init(ROOT);
@@ -26,8 +30,13 @@ try {
     if (await fetch(`http://127.0.0.1:${DASH}/api/state`).then((r) => r.ok).catch(() => false)) break;
     await new Promise((r) => setTimeout(r, 250));
   }
-  b = await chromium.launch({ executablePath: BROWSER_PATH });
-  const page = await b.newPage({ viewport: { width: 1440, height: 960 } });
+  b = CDP_URL ? await chromium.connectOverCDP(CDP_URL) : await chromium.launch({ executablePath: BROWSER_PATH });
+  // A CDP-connected browser exposes an existing context rather than newPage(),
+  // and the viewport is set on the page instead of at creation.
+  const page = CDP_URL
+    ? await (b.contexts()[0] ?? (await b.newContext())).newPage()
+    : await b.newPage({ viewport: { width: 1440, height: 960 } });
+  if (CDP_URL) await page.setViewportSize({ width: 1440, height: 960 });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${DASH}/?workspace=1`);
