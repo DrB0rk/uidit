@@ -468,3 +468,23 @@ test('comment text is bounded where both surfaces write', () => {
   store.addComment(cwd, { text: 'x'.repeat(4000), page: null, attachments: [] });
   assert.equal(store.readSession(cwd).comments.length, 1, 'the documented maximum must still be accepted');
 });
+
+test('element and edit fields are bounded at the shared boundary', () => {
+  // Same class as the 2MB comment: the dashboard slices these before sending,
+  // but any other caller could store an unbounded value that every read parses.
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  assert.throws(() => store.upsertElement(cwd, { selector: 'x'.repeat(2001), page: 'http://x/' }), /selector must be 2000/);
+  assert.throws(() => store.upsertElement(cwd, { selector: '.a', text: 'x'.repeat(301), page: 'http://x/' }), /text must be 300/);
+  assert.throws(() => store.upsertElement(cwd, { selector: '.a', page: 'x'.repeat(2001) }), /page must be 2000/);
+
+  const element = store.upsertElement(cwd, { selector: '.a', tag: 'div', text: 'Card', page: 'http://x/' });
+  assert.throws(() => store.addEdit(cwd, { elementId: element.id, kind: 'text', after: 'x'.repeat(2001) }), /after must be 2000/);
+  assert.throws(() => store.addEdit(cwd, { elementId: element.id, kind: 'style', property: 'p'.repeat(101), after: '1px' }), /property must be 100/);
+
+  assert.equal(store.readSession(cwd).elements.length, 1, 'nothing extra may be stored');
+  assert.equal(store.readSession(cwd).edits.length, 0, 'a refused edit must not be written');
+  // The values the surfaces actually send still pass.
+  store.addEdit(cwd, { elementId: element.id, kind: 'style', property: 'background-color', before: 'x'.repeat(2000), after: 'red' });
+  assert.equal(store.readSession(cwd).edits.length, 1);
+});

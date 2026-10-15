@@ -157,6 +157,7 @@ export function stableId(prefix, selector) {
 }
 
 export function upsertElement(cwd, element) {
+  assertBounded(element, FIELD_LIMITS.element, 'element');
   return withSession(cwd, () => {
   const session = readSession(cwd);
   const anchor = anchorFor(element);
@@ -184,6 +185,21 @@ export function upsertElement(cwd, element) {
  */
 export function selectComments(session, resolved) {
   return session.comments.filter((comment) => (resolved === undefined ? !comment.resolved : Boolean(comment.resolved) === resolved));
+}
+
+/// Field caps for records written through the shared boundary. The dashboard and
+/// the overlay already slice to these; enforcing them here stops any other caller
+/// storing a value that every later read and SSE push has to carry.
+const FIELD_LIMITS = {
+  element: { selector: 2000, page: 2000, text: 300, tag: 32, accessibleName: 240, role: 80, nearbyText: 240 },
+  edit: { property: 100, before: 2000, after: 2000 },
+};
+
+function assertBounded(record, limits, label) {
+  for (const [field, max] of Object.entries(limits)) {
+    const value = record?.[field];
+    if (typeof value === 'string' && value.length > max) throw new Error(`${label} ${field} must be ${max} characters or fewer`);
+  }
 }
 
 /// Bounded free text, matching what the dashboard and the agent tool schema send.
@@ -265,6 +281,7 @@ const EDIT_KINDS = { text: true, style: true, class: true, attribute: true, remo
 
 export function addEdit(cwd, edit) {
   if (!edit || !EDIT_KINDS[edit.kind]) throw new Error(`unsupported edit kind: ${edit?.kind ?? '(missing)'}`);
+  assertBounded(edit, FIELD_LIMITS.edit, 'edit');
   return withSession(cwd, () => {
   const session = readSession(cwd);
   const record = {
