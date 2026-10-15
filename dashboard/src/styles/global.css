@@ -308,6 +308,20 @@ ol.empty-steps { padding-left: var(--sp-5); }
   font-size: var(--text-xs);
 }
 
+/* The feedback panel scrolls, and its content is roughly twice the visible
+   height, so the primary "Add note" action used to sit below the fold -- every
+   reviewer (and every agent) had to scroll before it could be clicked. Pinning
+   the action row to the bottom edge keeps it reachable at any scroll position. */
+.selection-empty .selection-actions {
+  position: sticky;
+  bottom: calc(var(--sp-3) * -1);
+  z-index: 1;
+  margin: 0 calc(var(--sp-3) * -1) calc(var(--sp-3) * -1);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--paper);
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- selection inspector ---------- */
 .selection {
   background: var(--raised);
