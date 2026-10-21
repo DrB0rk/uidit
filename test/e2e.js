@@ -128,8 +128,7 @@ try {
   const floatingAfter = await floatingFrame.boundingBox();
   assert.ok(Math.abs(floatingAfter.x - floatingBefore.x) > 50, 'dragging should move the floating control iframe');
 
-  // The documented shortcuts work wherever focus is: the panel, the preview page
-  // or the floating control. Escape clears the preview's own layers first.
+  // Inspect toggles from each surface; Escape clears the active tool and keeps the panel open.
   const focusPreview = () => frame.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
   const inspectPressed = () => page.locator('.bar.compact').getByRole('button', { name: 'Inspect', exact: true }).getAttribute('aria-pressed');
   assert.equal(await page.locator('.workspace-drawer').count(), 1, 'the workspace panel is open before the shortcut checks');
@@ -139,9 +138,13 @@ try {
   await page.keyboard.press('i');
   await page.waitForTimeout(150);
   assert.equal(await inspectPressed(), 'false', 'I toggles inspection off from the panel');
+  await page.locator('.bar.compact').getByRole('button', { name: 'Inspect', exact: true }).click();
+  assert.equal(await inspectPressed(), 'true', 'the Inspect button activates the tool');
+  await page.locator('.bar.compact').getByRole('button', { name: 'Inspect', exact: true }).click();
+  assert.equal(await inspectPressed(), 'false', 'clicking Inspect again deselects the tool');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
-  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'Escape closes the panel from the panel');
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape leaves the panel open');
   await focusPreview();
   await page.keyboard.press('g');
   await page.waitForTimeout(250);
@@ -152,25 +155,30 @@ try {
   await frame.locator('#pay').hover();
   await page.waitForTimeout(200);
   assert.ok(await frame.evaluate(() => document.querySelectorAll('[data-uidit-hover]').length) > 0, 'inspection from the preview highlights page elements');
-  await page.keyboard.press('i');
-  await page.waitForTimeout(150);
-  assert.equal(await inspectPressed(), 'false', 'I toggles inspection off from the preview');
+  await frame.locator('#pay').click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('data-uidit-selected') === '1');
+  assert.notEqual(await frame.locator('#pay').getAttribute('contenteditable'), 'true', 'the first click selects without editing text');
+  await frame.locator('#pay').click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('contenteditable') === 'true');
+  assert.equal(await page.getByRole('button', { name: 'Text', exact: true }).count(), 0, 'text editing is integrated into Inspect');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
-  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'Escape closes the panel from the preview');
+  assert.equal(await inspectPressed(), 'false', 'Escape deselects Inspect from the preview');
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape from the preview leaves the panel open');
+  assert.equal(await frame.locator('#pay').getAttribute('contenteditable'), null, 'Escape ends inline text editing');
   await floating.locator('.fab').focus();
   await page.keyboard.press('Enter');
   await floating.locator('.menu.open').waitFor();
   await page.keyboard.press('g');
   await page.waitForTimeout(250);
   assert.equal(await page.locator('.workspace-drawer').count(), 1, 'G reaches the panel from the floating control');
+  await floating.locator('[data-action="inspect"]').click();
+  await page.waitForFunction(() => document.querySelector('.bar.compact .modes button')?.getAttribute('aria-pressed') === 'true');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
   await floating.locator('.menu.open').waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape closes the control menu before the panel');
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(250);
-  assert.equal(await page.locator('.workspace-drawer').count(), 0, 'the next Escape closes the panel from the floating control');
+  assert.equal(await inspectPressed(), 'false', 'Escape from the floating control deselects Inspect');
+  assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape from the floating control leaves the panel open');
   await page.keyboard.press('g');
   await page.waitForTimeout(250);
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Settings/ }).click();

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Compass, MousePointer2, Type, FileJson, RefreshCw } from 'lucide-react';
+import { Compass, MousePointer2, FileJson, RefreshCw } from 'lucide-react';
 
 export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, onReload, compact = false }) {
   const [url, setUrl] = useState(config?.targetUrl ?? '');
@@ -48,20 +48,11 @@ export default function Toolbar({ config, onConnect, onDiscover, mode, onMode, o
       <button
         className="btn"
         aria-pressed={mode === 'inspect'}
-        onClick={() => onMode('inspect')}
-        title="Click any element to tag it (I)"
+        onClick={() => onMode(mode === 'inspect' ? 'off' : 'inspect')}
+        title="Select an element, then click it again to edit its text (I)"
       >
         <MousePointer2 size={15} aria-hidden="true" />
         Inspect
-      </button>
-      <button
-        className="btn"
-        aria-pressed={mode === 'text'}
-        onClick={() => onMode('text')}
-        title="Edit text in place"
-      >
-        <Type size={15} aria-hidden="true" />
-        Text
       </button>
     </div>
   );

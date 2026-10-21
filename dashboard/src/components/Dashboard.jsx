@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './Toolbar.jsx';
-import Sidebar from './Sidebar.jsx';
-import { AgentsPanel, ServerPanel, SettingsPanel } from './RuntimePanels.jsx';
-import { DesignPanel } from './DesignPanel.jsx';
 import { useSession } from '../state/useSession.js';
 import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles } from 'lucide-react';
-import { FlowsPanel } from './RuntimePanels.jsx';
+
+const Sidebar = lazy(() => import('./Sidebar.jsx'));
+const DesignPanel = lazy(() => import('./DesignPanel.jsx').then((module) => ({ default: module.DesignPanel })));
+const FlowsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.FlowsPanel })));
+const ServerPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.ServerPanel })));
+const AgentsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.AgentsPanel })));
+const SettingsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.SettingsPanel })));
 
 const TABS = [['feedback', 'Feedback', MessageSquareText], ['design', 'Design', WandSparkles], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['flows', 'Flows', Workflow], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
 const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
@@ -27,14 +30,14 @@ function clampDrawerWidth(width) {
 }
 
 export default function Dashboard() {
-  const { config, session, status: live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
+  const { config, session, status: live, loading, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
   const frameRef = useRef(null);
   const replayWaiters = useRef(new Map());
   const [mode, setMode] = useState('off');
   const [selected, setSelected] = useState(null);
   const [anchorStatuses, setAnchorStatuses] = useState({});
   const [status, setStatus] = useState({ text: 'ready', kind: '' });
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const [tab, setTab] = useState('feedback');
   const [reloadKey, setReloadKey] = useState(0);
   const [replayState, setReplayState] = useState(null);
@@ -76,7 +79,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('workspace') === '1') setWorkspaceOpen(true);
+    if (params.get('workspace') === '0') setWorkspaceOpen(false);
     const initialTab = params.get('tab');
     if (TABS.some(([id]) => id === initialTab)) setTab(initialTab);
   }, []);
@@ -94,15 +97,19 @@ export default function Dashboard() {
   }, []);
 
   const runShortcut = useCallback((key) => {
-    if (key === 'escape') { toOverlay({ type: 'escape' }); if (workspaceOpen) setWorkspaceOpen(false); else setMode('off'); return; }
+    if (key === 'escape') {
+      toOverlay({ type: 'escape' });
+      if (mode !== 'off') setMode('off');
+      return;
+    }
     if (key === 'i') { const next = mode === 'inspect' ? 'off' : 'inspect'; setMode(next); toOverlay({ type: 'mode', mode: next }); return; }
     if (key === 'g' || key === 'c') { showWorkspace('feedback'); return; }
     if (key === 'u') toOverlay({ type: 'showControls' });
-  }, [mode, showWorkspace, toOverlay, workspaceOpen]);
+  }, [mode, showWorkspace, toOverlay]);
 
   const syncOverlay = useCallback(() => {
     toOverlay({ type: 'mode', mode });
-    toOverlay({ type: 'state', openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, browserInspection: config?.ui?.allowBrowserInspection === true, comments: session.comments, elements: session.elements, theme });
+    toOverlay({ type: 'state', mode, openComments: session.comments.filter((c) => !c.resolved).length, pendingEdits: session.edits.filter((e) => !e.applied).length, dev, mcpClients: mcp.clientCount, position: config?.ui?.position, browserInspection: config?.ui?.allowBrowserInspection === true, comments: session.comments, elements: session.elements, theme });
   }, [mode, session, dev, mcp.clientCount, config?.ui?.position, config?.ui?.allowBrowserInspection, theme, toOverlay]);
 
   const onStatus = useCallback((text, kind = '') => setStatus({ text, kind }), []);
@@ -202,7 +209,7 @@ export default function Dashboard() {
         }
         if (msg.action === 'workspace') {
           showWorkspace(msg.tab);
-          if (msg.quickEdit === true) { setMode('text'); toOverlay({ type: 'mode', mode: 'text' }); }
+          if (msg.quickEdit === true) { setMode('inspect'); toOverlay({ type: 'mode', mode: 'inspect' }); }
         }
       }
       if (msg.type === 'mode' && typeof msg.mode === 'string') setMode(msg.mode);
@@ -310,7 +317,19 @@ export default function Dashboard() {
     toOverlay({ type: 'theme', theme: next });
   };
 
+  if (loading) return <main ref={mainRef} className="immersive workspace-open" aria-busy="true">
+    <div className="dashboard-loader" role="status" aria-live="polite">
+      <span className="uidit-loader-mark" aria-hidden="true">U</span>
+      <p>Preparing your review workspace</p>
+      <span className="uidit-loader-track" aria-hidden="true"><span /></span>
+    </div>
+  </main>;
+
   return <main ref={mainRef} className={`immersive${workspaceOpen ? ' workspace-open' : ''}${resizingDrawer ? ' resizing' : ''}`}>
+    {workspaceOpen && <div className="workspace-wordmark" aria-label="UIDIT">
+      <span className="workspace-wordmark-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="3.6" strokeLinecap="round"><path d="M7 8v12a8 8 0 0 0 16 0V8"/><path d="M24.5 8v5"/></svg></span>
+      <span>uidit</span>
+    </div>}
     {targetUrl ? <>
       <div className={`preview-device-stage device-${device}${reference && compareMode === 'side' ? ' compare-side' : ''}`} style={{ '--reference-opacity': referenceOpacity / 100, '--custom-width': `${customViewport.width}px`, '--custom-height': `${customViewport.height}px` }}>
         <div className={`preview-live-frame device-${device}`}>
@@ -345,12 +364,14 @@ export default function Dashboard() {
       {targetUrl && <Toolbar compact config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
       <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
-        {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
-        {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
-        {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
-        {tab === 'server' && <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}
-        {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
-        {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
+        <Suspense fallback={<div className="workspace-panel-loading" role="status">Loading workspace…</div>}>
+          {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
+          {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
+          {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
+          {tab === 'server' && <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}
+          {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
+          {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
+        </Suspense>
       </div>
       <footer className="workspace-foot"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><span className="spacer" /><span>{live}</span></footer>
     </section>}

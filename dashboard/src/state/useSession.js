@@ -21,6 +21,7 @@ export function useSession() {
   const [config, setConfig] = useState(null);
   const [session, setSession] = useState(EMPTY_SESSION);
   const [status, setStatus] = useState('connecting…');
+  const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
   const [dev, setDev] = useState({ state: 'idle', logs: [] });
   const [mcp, setMcp] = useState({ clientCount: 0 });
@@ -42,8 +43,8 @@ export function useSession() {
   useEffect(() => {
     let closed = false;
     Promise.all([refresh(), req('/api/dev'), req('/api/mcp')]).then(([, nextDev, nextMcp]) => {
-      if (closed) return; setDev(nextDev); setMcp(nextMcp);
-    }).catch((err) => setStatus(err.message));
+      if (closed) return; setDev(nextDev); setMcp(nextMcp); setLoading(false);
+    }).catch((err) => { if (!closed) { setStatus(err.message); setLoading(false); } });
 
     const source = new EventSource('/api/stream');
     sourceRef.current = source;
@@ -128,5 +129,5 @@ export function useSession() {
     captureTaskSnapshot: (taskId, kind) => withSession(req(`/api/tasks/${encodeURIComponent(taskId)}/captures/${kind}`, 'POST', {})),
   };
 
-  return { config, session, status, live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, refresh, actions };
+  return { config, session, status, loading, live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, refresh, actions };
 }

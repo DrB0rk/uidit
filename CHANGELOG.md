@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 — 2026-10-21
+
+- Inspect is now a toggleable tool: the first click selects an element, a second click edits its text in place, and Escape ends the active tool without closing the workspace.
+- The review workspace opens by default with a branded loading state, a UIDIT mark, and a smoother preview frame. Dragging the floating control no longer triggers the page scrollbar.
+- Dashboard panels load on demand, reducing the initial dashboard bundle. Feedback triage now bounds duplicate comparisons and suggestions for large queues and reports when results are partial.
+- Updated the UIDIT agent skill with a clearer workflow for locating page code, claiming tasks, attaching evidence, and verifying changes.
+
 ## 0.9.1 — 2026-10-13
 
 - Keyboard shortcuts now work wherever focus is: the panel, the previewed page, and the floating control. `I`, `C`, `G`, `Escape` and `U` all reach the same actions from any of them, so reviewing the page no longer requires clicking back into the panel first.

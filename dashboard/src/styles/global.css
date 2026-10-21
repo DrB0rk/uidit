@@ -520,6 +520,16 @@ ol.empty-steps { padding-left: var(--sp-5); }
 .muted { color: var(--fg-muted); }
 .hint { font-size: var(--text-xs); }
 
+.dashboard-loader { position:fixed; inset:0; z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--fg); background:var(--canvas); animation:uidit-loader-in .2s ease-out both; }
+.dashboard-loader p { margin:0; color:var(--fg-muted); font-size:13px; }
+.uidit-loader-mark { position:relative; display:grid; place-items:center; width:48px; height:48px; border:1px solid var(--border); border-radius:15px; color:var(--accent-text); background:var(--surface); box-shadow:var(--shadow-raised); font-size:23px; font-weight:750; letter-spacing:-.06em; }
+.uidit-loader-mark::after { content:''; position:absolute; inset:-5px; border:2px solid transparent; border-top-color:var(--accent-text); border-right-color:var(--accent); border-radius:50%; animation:uidit-loader-spin .9s linear infinite; }
+.uidit-loader-track { width:148px; height:3px; overflow:hidden; border-radius:999px; background:var(--raised); }
+.uidit-loader-track span { display:block; width:42%; height:100%; border-radius:inherit; background:var(--accent-text); animation:uidit-loader-sweep 1.25s ease-in-out infinite; }
+@keyframes uidit-loader-in { from { opacity:0; } to { opacity:1; } }
+@keyframes uidit-loader-spin { to { transform:rotate(360deg); } }
+@keyframes uidit-loader-sweep { from { transform:translateX(-110%); } to { transform:translateX(350%); } }
+
 kbd {
   font: var(--text-xs) var(--mono);
   padding: 1px 5px;
@@ -547,7 +557,7 @@ kbd {
 .immersive { --drawer-width: min(420px, 100vw); position: fixed; inset: 0; min-height: 100dvh; overflow: hidden; isolation: isolate; background: #f4f3ed; }
 .immersive.workspace-open { background: var(--surface); }
 .preview-device-stage { --preview-width:100%; --preview-height:100%; position:absolute; inset:12px; display:flex; align-items:center; justify-content:center; overflow:auto; background:#f4f3ed; }
-.immersive.workspace-open .preview-device-stage { right:var(--drawer-width); top:54px; inset-block-end:12px; }
+.immersive.workspace-open .preview-device-stage { right:var(--drawer-width); top:54px; inset-block-end:12px; background:var(--surface); }
 .preview-device-stage.device-tablet { --preview-width:min(768px,100%); --preview-height:1024px; }
 .preview-device-stage.device-phone { --preview-width:min(390px,100%); --preview-height:844px; }
 .preview-live-frame { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); min-height:0; overflow:hidden; outline:1px solid #dedee7; outline-offset:-1px; border-radius:16px; background:#fff; box-shadow:0 12px 36px #17182220; transition:width .2s ease,flex-basis .2s ease; }
@@ -561,8 +571,10 @@ kbd {
 .custom-viewport { display:flex; align-items:center; gap:4px; padding-left:6px; color:var(--muted); font-size:11px; }
 .custom-viewport input { width:54px; height:27px; padding:2px 4px; border:1px solid var(--border); border-radius:5px; color:var(--fg); background:var(--canvas); }
 .component-state-actions { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
-.immersive.workspace-open .preview-live-frame { border-color:var(--surface); outline-color:var(--surface); box-shadow:0 10px 28px #17182215; }
+/* The preview and drawer share one divider; the frame edge makes the live page read as a distinct, rounded surface. */
+.immersive.workspace-open .preview-live-frame { border:1px solid var(--border); border-right:0; border-radius:16px; outline:0; outline-color:var(--surface); background:var(--surface); box-shadow:0 10px 28px #17182215; }
 .immersive-preview { position:absolute; inset:0; display:block; width:100%; height:100%; border:0; background:#f4f3ed; }
+.immersive.workspace-open .immersive-preview { border-radius:15px; }
 .preview-reference-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:var(--reference-opacity,.5); pointer-events:none; }
 .preview-device-stage.compare-side { justify-content:flex-start; gap:12px; }
 .preview-reference-side { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); overflow:hidden; border:1px solid var(--border); border-radius:16px; background:var(--raised); box-shadow:0 10px 28px #17182215; }
@@ -572,15 +584,17 @@ kbd {
 .device-toolbar button { display:inline-flex; align-items:center; gap:5px; min-height:29px; padding:4px 8px; border:0; border-radius:7px; color:var(--fg-muted); background:transparent; font:500 11px var(--font); cursor:pointer; }
 .device-toolbar button:hover,.device-toolbar button.active { color:var(--fg); background:var(--raised); }
 .device-toolbar button.active { box-shadow:inset 0 0 0 1px var(--border); }
+.workspace-wordmark { position:absolute; z-index:5; top:14px; left:18px; display:flex; align-items:center; gap:8px; color:var(--fg); font-size:14px; font-weight:750; letter-spacing:-.4px; pointer-events:none; }
+.workspace-wordmark-icon { display:grid; place-items:center; width:28px; height:28px; border:1px solid var(--border); border-radius:9px; color:var(--accent-text); background:var(--surface); }
+.workspace-wordmark-icon svg { width:18px; height:18px; }
 .immersive.workspace-open .immersive-empty { right: var(--drawer-width); }
 .immersive-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--fg); text-align: center; }
 .immersive-empty h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.04em; }
 .immersive-empty p { max-width: 520px; color: var(--fg-muted); }
 .workspace-drawer { position: absolute; z-index: 20; inset: 0 0 0 auto; width: var(--drawer-width); display: flex; flex-direction: column; min-height: 0; color: var(--fg); background: var(--surface); animation: drawer-in .22s cubic-bezier(.2,.75,.24,1); }
-/* The panel edge is the resize handle: a 1px rule inside an 11px grab area that
-   straddles the boundary, so it is easy to hit without adding chrome. */
+/* Keep the resize target wide while showing its edge only during interaction. */
 .workspace-resizer { position: absolute; z-index: 30; top: 0; bottom: 0; left: -5px; width: 11px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
-.workspace-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: var(--border); transition: background .12s, width .12s; }
+.workspace-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: transparent; transition: background .12s, width .12s; }
 .workspace-resizer:hover::before,.workspace-resizer:focus-visible::before,.immersive.resizing .workspace-resizer::before { width: 2px; background: var(--accent-text); }
 .workspace-resizer:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -3px; }
 .immersive.resizing { user-select: none; }
@@ -617,6 +631,7 @@ kbd {
 .workspace-tabs button.active svg { color: var(--accent-text); }
 .tab-count { padding: 1px 5px; border-radius: 12px; background: var(--accent-wash); color: var(--accent-text); font-size: 9px; }
 .workspace-content { min-height: 0; flex: 1; overflow: auto; }
+.workspace-panel-loading { display:grid; min-height:180px; place-items:center; color:var(--fg-muted); font-size:12px; }
 .workspace-content > .side { height: 100%; min-height: 0; border: 0; }
 .workspace-content .tabs { display: none; }
 .workspace-content .panel { padding: 14px; }
@@ -847,8 +862,11 @@ kbd {
   .immersive.workspace-open { display: flex; flex-direction: column; }
   .immersive.workspace-open .preview-device-stage { position:relative; inset:auto; width:calc(100% - 16px); height:calc(48dvh - 8px); margin:54px 8px 0; flex:0 0 calc(48dvh - 62px); }
   .immersive.workspace-open .preview-live-frame,.immersive.workspace-open .preview-reference-side { border-radius:12px; }
+  .immersive.workspace-open .immersive-preview { border-radius:11px; }
   .device-toolbar { top:8px; left:50%; max-width:calc(100vw - 20px); }
   .device-toolbar button { padding-inline:6px; }
+  .workspace-wordmark { top:8px; left:10px; gap:0; }
+  .workspace-wordmark > span:last-child { display:none; }
   .immersive.workspace-open .immersive-empty { position: relative; inset: auto; min-height: 48dvh; flex: 0 0 48dvh; }
   .workspace-drawer { position: relative; inset: auto; width: 100%; height: 52dvh; flex: 1 1 52dvh; }
   .workspace-resizer { display: none; }
@@ -856,4 +874,8 @@ kbd {
   .workspace-drawer .bar { gap: 5px; }
   .workspace-drawer .bar .field { flex: 1 1 190px; }
 }
-@media (prefers-reduced-motion: reduce) { .workspace-drawer { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-drawer { animation:none; }
+  .dashboard-loader,.uidit-loader-mark::after,.uidit-loader-track span { animation:none; }
+  .uidit-loader-track span { width:100%; }
+}

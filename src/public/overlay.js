@@ -12,6 +12,7 @@
     pendingStyle: null,
   };
   let hoverEl = null;
+  let textEditing = null;
   let drawingTool = 'off';
   let visualState = { comments: [], elements: [] };
   let openCommentId = null;
@@ -496,6 +497,49 @@
     state.pendingStyle = null;
   }
 
+  function beginTextEditing() {
+    const el = state.selected?.el;
+    if (!el || textEditing?.el === el) return;
+    if (textEditing) finishTextEditing(true);
+    textEditing = {
+      el,
+      before: collapse(el.textContent),
+      contentEditable: el.getAttribute('contenteditable'),
+      elementId: state.selected.record?.id ?? null,
+    };
+    el.setAttribute('contenteditable', 'true');
+    el.focus({ preventScroll: true });
+  }
+
+  function placeTextCaret(ev) {
+    if (!textEditing) return;
+    const range = document.caretRangeFromPoint?.(ev.clientX, ev.clientY);
+    if (!range || !textEditing.el.contains(range.startContainer)) return;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  async function finishTextEditing(commit = true) {
+    const editing = textEditing;
+    if (!editing) return;
+    textEditing = null;
+    if (!editing.el.isConnected) return;
+    const after = collapse(editing.el.textContent);
+    if (editing.contentEditable === null) editing.el.removeAttribute('contenteditable');
+    else editing.el.setAttribute('contenteditable', editing.contentEditable);
+    editing.el.blur();
+    if (!commit || after === editing.before) return;
+    let elementId = editing.elementId;
+    if (!elementId) {
+      const { element } = await api('/element', 'POST', describe(editing.el));
+      elementId = element.id;
+      if (state.selected?.el === editing.el) state.selected.record = element;
+    }
+    const edit = await api('/edit', 'POST', { elementId, kind: 'text', before: editing.before, after, page: realPage() });
+    post('edited', { edit });
+  }
+
   function select(el) {
     restoreSelected();
     state.selected = { el, record: describe(el) };
@@ -661,8 +705,24 @@
   function onClick(ev) {
     if (state.mode !== 'inspect') return;
     if (ev.target.closest?.('[data-uidit-ui]')) return;
+    if (textEditing?.el.contains(ev.target)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      placeTextCaret(ev);
+      return;
+    }
     ev.preventDefault();
     ev.stopPropagation();
+    const selected = state.selected?.el;
+    if (selected && (selected === ev.target || selected.contains(ev.target))) {
+      beginTextEditing();
+      placeTextCaret(ev);
+      return;
+    }
+    if (textEditing) {
+      finishTextEditing(true).then(() => select(ev.target));
+      return;
+    }
     select(ev.target);
   }
 
@@ -681,19 +741,20 @@
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('keydown', (ev) => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    const typing = /INPUT|TEXTAREA|SELECT/.test(ev.target?.tagName ?? '') || ev.target?.isContentEditable === true;
     const key = ev.key.toLowerCase();
     if (key === 'escape') {
-      const hadLocalWork = !contextMenu.hidden || drawingTool !== 'off' || Boolean(state.selected);
+      ev.preventDefault();
+      ev.stopPropagation();
       closeContextMenu();
       setDrawingTool('off');
-      restoreSelected();
-      post('selected', { element: null });
-      // With none of our own layers open, Escape belongs to the panel hosting the preview.
-      if (!hadLocalWork && !typing) post('shortcut', { key: 'escape' });
+      if (textEditing) finishTextEditing(true).catch((err) => post('error', { message: err.message }));
+      if (state.mode !== 'off') {
+        state.mode = 'off';
+        post('mode', { mode: 'off' });
+      }
       return;
     }
-    if (typing) return;
+    if (/INPUT|TEXTAREA|SELECT/.test(ev.target?.tagName ?? '') || ev.target?.isContentEditable === true) return;
     // The panel owns review state, so the preview reports these instead of acting on them.
     if (key === 'i' || key === 'c' || key === 'g') post('shortcut', { key });
   });
@@ -705,9 +766,14 @@
       // The control frame carries the button; moving it by the pointer's own deltas
       // keeps the button under the pointer without a position round trip per event.
       if (msg.type === 'action' && msg.action === 'dragMove' && (Number.isFinite(msg.dx) || Number.isFinite(msg.dy))) {
+        document.documentElement.classList.add('uidit-dragging');
         setFloating(floating.x + (Number(msg.dx) || 0), floating.y + (Number(msg.dy) || 0), false);
       }
-      if (msg.type === 'action' && msg.action === 'dragCommit') setFloating(floating.x, floating.y);
+      if (msg.type === 'action' && msg.action === 'dragCommit') {
+        document.documentElement.classList.remove('uidit-dragging');
+        setFloating(floating.x, floating.y);
+      }
+      if (msg.type === 'action' && msg.action === 'dragCancel') document.documentElement.classList.remove('uidit-dragging');
       if (msg.type === 'action' && msg.action === 'shortcut' && ['i', 'c', 'g', 'escape'].includes(msg.key)) post('shortcut', { key: msg.key });
       if (msg.type === 'action' && msg.action === 'inspect' && typeof msg.enabled === 'boolean') post('control', { action: 'inspect', enabled: msg.enabled });
       if (msg.type === 'action' && msg.action === 'draw' && ['arrow', 'rectangle', 'ellipse', 'freehand', 'off'].includes(msg.tool)) post('control', { action: 'draw', tool: msg.tool });
@@ -805,7 +871,14 @@
       controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'theme', theme: msg.theme }, controlOrigin); return;
     }
     if (msg.type === 'drawMode') { setDrawingTool(msg.tool); return; }
-    if (msg.type === 'escape') { controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin); }
+    if (msg.type === 'escape') {
+      closeContextMenu();
+      setDrawingTool('off');
+      if (textEditing) finishTextEditing(true).catch((err) => post('error', { message: err.message }));
+      state.mode = 'off';
+      post('mode', { mode: 'off' });
+      controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin);
+    }
     if (msg.type === 'hideControls') { controls.hidden = true; return; }
     if (msg.type === 'showControls') { controls.hidden = false; return; }
     handle(msg).catch((err) => post('error', { message: err.message }));
@@ -818,17 +891,10 @@
   async function handle(msg) {
 
     if (msg.type === 'mode') {
-      state.mode = msg.mode;
+      state.mode = msg.mode === 'inspect' || msg.mode === 'text' ? 'inspect' : 'off';
+      if (msg.mode === 'text') beginTextEditing();
+      else if (state.mode === 'off' && textEditing) await finishTextEditing(true);
       post('mode', { mode: state.mode });
-      if (msg.mode === 'text' && state.selected) {
-        state.selected.el.setAttribute('contenteditable', 'true');
-        state.selected.el.focus();
-        state.selected.el.addEventListener(
-          'input',
-          () => post('textdraft', { elementId: state.selected.record.id, text: collapse(state.selected.el.textContent) }),
-          { once: true },
-        );
-      }
     }
 
     if (msg.type === 'comment') {
@@ -887,20 +953,7 @@
     if (msg.type === 'proposalReset') { proposalRestore?.(); proposalRestore = null; post('proposal-preview', { ok: true, reset: true }); }
 
     if (msg.type === 'commitText') {
-      const el = state.selected?.el;
-      if (!el) return;
-      const before = el.getAttribute('data-uidit-original-text') ?? collapse(msg.previous);
-      el.setAttribute('data-uidit-original-text', before);
-      el.removeAttribute('contenteditable');
-      el.blur();
-      const edit = await api('/edit', 'POST', {
-        elementId: state.selected.record.id,
-        kind: 'text',
-        before,
-        after: collapse(el.textContent),
-        page: realPage(),
-      });
-      post('edited', { edit });
+      await finishTextEditing(true);
     }
 
     if (msg.type === 'attribute') {

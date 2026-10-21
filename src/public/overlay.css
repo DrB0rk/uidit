@@ -9,6 +9,8 @@ iframe[data-uidit-ui] {
   background: transparent;
 }
 
+html.uidit-dragging,html.uidit-dragging body { overflow:clip!important; overscroll-behavior:none!important; }
+
 /* Positioned by overlay.js from the reviewer's dragged position: a small square
    while idle so it covers no more of the page than the button itself, then
    widened to hold the panel. */

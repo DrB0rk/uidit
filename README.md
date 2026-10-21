@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.9.1">Latest release: v0.9.1</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.0">Latest release: v0.10.0</a> · Node.js 22+</p>
 
 ---
 
@@ -312,6 +312,8 @@ component hints when the page exposes them. Comment threads can carry project
 relative file and line references; use `uidit_link_code` to add one. Both agents
 and reviewers can set feedback progress to `open`, `in_progress`, or `needs_info`;
 resolution remains a separate completion action.
+Duplicate-pair suggestions are bounded for large queues; check
+`possibleDuplicatesTruncated` before treating the list as complete.
 Tasks are separate from comment resolution: agents claim them with revision
 checks, attach evidence, and report implementation and verification updates;
 only the reviewer can accept a verified task. Additional MCP tools include

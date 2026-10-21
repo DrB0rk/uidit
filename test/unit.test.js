@@ -270,6 +270,13 @@ test('triage groups related feedback, prioritizes urgency, and detects likely du
   assert.equal(triage.suggestedOrder[0].element.component.name, 'Checkout');
 });
 
+test('triage bounds duplicate suggestions for large feedback queues', () => {
+  const comments = Array.from({ length: 300 }, (_, index) => ({ id: `cm-${index}`, text: 'Please make the card spacing consistent', resolved: false }));
+  const triage = triageFeedback(comments);
+  assert.equal(triage.possibleDuplicates.length, 200);
+  assert.equal(triage.possibleDuplicatesTruncated, true);
+});
+
 test('edits record before/after and applied defaults to false', () => {
   const cwd = tmpProject();
   store.init(cwd);
