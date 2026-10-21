@@ -1,4 +1,4 @@
-name: Publish GitHub Package
+name: Verify and attach GitHub install tarball
 
 on:
   release:
@@ -6,10 +6,9 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
-  publish:
+  verify-release:
     if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
@@ -23,17 +22,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build:dashboard
       - run: npm test
-      - name: Build public install tarball
+      - name: Build GitHub install tarball
         run: npm pack --ignore-scripts
       - name: Attach tarball to the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" drb0rk-uidit-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
-      - name: Publish package to GitHub Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '//npm.pkg.github.com/:_authToken=%s\n@drb0rk:registry=https://npm.pkg.github.com\n' "$NODE_AUTH_TOKEN" > "$RUNNER_TEMP/github-npmrc"
-          chmod 600 "$RUNNER_TEMP/github-npmrc"
-          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/github-npmrc" npm publish

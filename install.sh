@@ -9,9 +9,7 @@
 set -eu
 
 REPO="DrB0rk/uidit"
-VERSION="0.10.2"
-PACKAGE="@drb0rk/uidit"
-REGISTRY="https://npm.pkg.github.com"
+VERSION="0.10.3"
 MIN_NODE_MAJOR=22
 
 say()  { printf '%s\n' "$*"; }
@@ -36,35 +34,16 @@ fi
 printf '  node %s · npm %s\n' "$(node -v)" "$(npm -v)"
 
 # --- install ------------------------------------------------------------------
-# The GitHub Packages npm registry requires authentication even for public
-# packages. Prefer the public release tarball for anonymous installs; use the
-# registry only when the caller explicitly supplies a token.
+# Install the versioned release tarball hosted directly on GitHub.
 PACKAGE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/drb0rk-uidit-${VERSION}.tgz"
 SOURCE_URL="https://codeload.github.com/${REPO}/tar.gz/refs/tags/v${VERSION}"
 TARBALL="$(mktemp -t uidit.XXXXXX.tar.gz)"
-NPMRC=""
-trap 'rm -f "$TARBALL"; [ -z "$NPMRC" ] || rm -f "$NPMRC"' EXIT INT TERM
+trap 'rm -f "$TARBALL"' EXIT INT TERM
 
 installed=""
-GH_PACKAGES_TOKEN="${GH_PACKAGES_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
-if [ -n "$GH_PACKAGES_TOKEN" ]; then
-  NPMRC="$(mktemp -t uidit-npmrc.XXXXXX)"
-  chmod 600 "$NPMRC"
-  USER_NPMRC="$(npm config get userconfig 2>/dev/null || true)"
-  if [ -n "$USER_NPMRC" ] && [ -r "$USER_NPMRC" ]; then cat "$USER_NPMRC" > "$NPMRC"; fi
-  printf '\n@drb0rk:registry=%s\n' "$REGISTRY" >> "$NPMRC"
-  printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_PACKAGES_TOKEN" >> "$NPMRC"
-  unset GH_PACKAGES_TOKEN
-  if NPM_CONFIG_USERCONFIG="$NPMRC" npm install -g "${PACKAGE}@${VERSION}" >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
-    installed="GitHub Packages"
-  fi
-fi
-
-if [ -z "$installed" ]; then
-  say "  installing the public GitHub release package"
-  if curl -fsSL "$PACKAGE_URL" -o "$TARBALL" && npm install -g "$TARBALL" >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
-    installed="GitHub release"
-  fi
+say "  installing directly from the GitHub release"
+if curl -fsSL "$PACKAGE_URL" -o "$TARBALL" && npm install -g "$TARBALL" >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
+  installed="GitHub release"
 fi
 
 if [ -z "$installed" ]; then
@@ -76,9 +55,7 @@ if [ -z "$installed" ]; then
   installed="GitHub source"
 fi
 
-if [ "$installed" = "GitHub Packages" ]; then
-  printf '  installed from GitHub Packages\n'
-elif [ "$installed" = "GitHub release" ]; then
+if [ "$installed" = "GitHub release" ]; then
   printf '  installed from the public GitHub release\n'
 fi
 

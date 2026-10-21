@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.2">Latest release: v0.10.2</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.3">Latest release: v0.10.3</a> · Node.js 22+</p>
 
 ---
 
@@ -25,20 +25,15 @@ uidit closes that gap. Your feedback is already structured data in the project.
 curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
 
-Needs Node 22+ and npm. The installer downloads the public release package
-without requiring a GitHub account, installs the `uidit` command, and verifies
-it runs before exiting. From a clone instead: `npm install -g .`
+Needs Node 22+ and npm. The installer downloads the versioned release tarball
+directly from GitHub, installs the `uidit` command, and verifies it runs before
+exiting. From a clone instead: `npm install -g .`
 
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.2/drb0rk-uidit-0.10.2.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.3/drb0rk-uidit-0.10.3.tgz
 ```
-
-The scoped package is also published to GitHub Packages. Its npm registry
-requires a classic PAT with `read:packages` even when the package is public;
-authenticate with `npm login --scope=@drb0rk --auth-type=legacy --registry=https://npm.pkg.github.com`
-or set `GH_PACKAGES_TOKEN` before using the installer to select that registry.
 
 ## Use
 

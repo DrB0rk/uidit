@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.3 — 2026-10-21
+
+- Removed GitHub Packages publishing and authentication paths. Installs now come directly from GitHub release assets, with a GitHub source archive fallback.
+
 ## 0.10.2 — 2026-10-21
 
 - Added a public install tarball to each GitHub release. The installer now uses that anonymous download by default, with authenticated GitHub Packages installation as an option.
