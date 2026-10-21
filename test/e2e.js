@@ -56,31 +56,53 @@ try {
   // A team review invite can be created from the feedback sidebar without
   // leaving the page or visiting the Agents settings view.
   const shareCard = page.getByRole('region', { name: 'Share team review' });
+  const shareUrl = 'https://share.uidit.app/room/e2e-room#e2e-token';
+  await page.route(`http://127.0.0.1:${DASH}/api/collaboration/room`, (route) => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ collaboration: { enabled: true, connected: true, roomId: 'e2e-room', project: 'e2e', inviteUrl: shareUrl, inviteExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), participants: [] } }) }));
   await shareCard.getByRole('button', { name: 'Create link' }).click();
-  assert.match(await shareCard.locator('input[type="url"]').inputValue(), /^https:\/\//);
-  await shareCard.getByPlaceholder('Paste ADMIN_SECRET').waitFor();
-  assert.match(await shareCard.innerText(), /exposes the current preview/);
-  assert.equal(await shareCard.getByRole('button', { name: 'Create share link' }).isDisabled(), true);
-  await shareCard.getByRole('button', { name: 'Close' }).click();
+  assert.equal(await shareCard.getByLabel('Team review share link').inputValue(), shareUrl, 'one click creates a uidit.app review link');
+  assert.equal(await shareCard.locator('input[type="password"]').count(), 0, 'sharing never asks for a relay secret');
+  assert.match(await shareCard.innerText(), /static HTML snapshot for reviewers; scripts and controls are disabled/);
+  await page.route(`http://127.0.0.1:${DASH}/api/collaboration/stop`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ collaboration: { enabled: false, connected: false, participants: [] } }) }));
+  page.once('dialog', (dialog) => dialog.accept());
+  await shareCard.getByRole('button', { name: 'Stop sharing' }).click();
+  await shareCard.getByRole('button', { name: 'Create link' }).waitFor();
+  assert.equal(await shareCard.getByLabel('Team review share link').count(), 0, 'stopping sharing removes the active invite from the dashboard');
+  await page.unroute(`http://127.0.0.1:${DASH}/api/collaboration/room`);
+  await page.unroute(`http://127.0.0.1:${DASH}/api/collaboration/stop`);
 
   // Device presets change the actual browsing context, and reference matching
   // supports both an overlay and a side-by-side comparison.
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   const devicePhone = page.getByRole('button', { name: 'Phone' });
   await devicePhone.click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(280);
   frame = page.frames().find((f) => f.url().includes('/proxy/'));
   const phoneViewport = await frame.evaluate(() => innerWidth);
   assert.ok(phoneViewport >= 380 && phoneViewport <= 400, `phone preview width: ${phoneViewport}`);
   const phoneHeight = await frame.evaluate(() => innerHeight);
   assert.ok(phoneHeight >= 830 && phoneHeight <= 860, `phone preview height: ${phoneHeight}`);
   await page.getByRole('button', { name: 'Tablet' }).click();
-  await page.waitForTimeout(200);
+  const tabletFrame = page.locator('.preview-live-frame');
+  await page.waitForTimeout(80);
+  const tabletTransitionWidth = await tabletFrame.evaluate((el) => el.getBoundingClientRect().width);
+  assert.ok(tabletTransitionWidth > 390 && tabletTransitionWidth < 768, `phone-to-tablet transition should pass through intermediate widths: ${tabletTransitionWidth}`);
+  await page.waitForTimeout(220);
   frame = page.frames().find((f) => f.url().includes('/proxy/'));
   const tabletViewport = await frame.evaluate(() => innerWidth);
   assert.ok(tabletViewport >= 760 && tabletViewport <= 768, `tablet preview width: ${tabletViewport}`);
   const tabletHeight = await frame.evaluate(() => innerHeight);
   assert.ok(tabletHeight >= 1000 && tabletHeight <= 1040, `tablet preview height: ${tabletHeight}`);
+  await page.getByRole('button', { name: 'Desktop' }).click();
+  const desktopFrame = page.locator('.preview-live-frame');
+  await desktopFrame.waitFor();
+  await page.waitForFunction(() => document.querySelector('.preview-live-frame')?.classList.contains('device-desktop'));
+  await page.waitForTimeout(280);
+  const desktopFrameWidth = await desktopFrame.evaluate((el) => el.getBoundingClientRect().width);
+  await page.getByRole('button', { name: 'Tablet' }).click();
+  await page.waitForTimeout(80);
+  const desktopTabletTransitionWidth = await desktopFrame.evaluate((el) => el.getBoundingClientRect().width);
+  assert.ok(desktopTabletTransitionWidth < desktopFrameWidth && desktopTabletTransitionWidth > 768, `desktop-to-tablet transition should interpolate between widths: ${desktopFrameWidth} → ${desktopTabletTransitionWidth}`);
+  await page.waitForTimeout(220);
   await page.getByRole('button', { name: 'Desktop' }).click();
   assert.equal(await page.locator('.preview-live-frame iframe').count(), 1, 'the preview is a single view');
   assert.equal(await page.getByRole('button', { name: '2 views' }).count(), 0, 'the view-count controls are gone');
@@ -158,9 +180,24 @@ try {
   await frame.locator('#pay').click();
   await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('data-uidit-selected') === '1');
   assert.notEqual(await frame.locator('#pay').getAttribute('contenteditable'), 'true', 'the first click selects without editing text');
+  await frame.locator('#pay span').click();
+  await frame.waitForFunction(() => document.querySelector('#pay span')?.getAttribute('data-uidit-selected') === '1');
+  assert.equal(await inspectPressed(), 'true', 'clicking a nested child selects it instead of entering text edit');
+  await frame.evaluate(() => document.body.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') event.stopPropagation();
+  }, { once: true }));
+  await page.keyboard.press('Escape');
+  await frame.waitForFunction(() => document.querySelector('#pay span')?.hasAttribute('data-uidit-selected') === false);
+  assert.equal(await frame.locator('#pay span').getAttribute('data-uidit-hover'), null, 'Escape also clears the stationary hover highlight');
+  assert.equal(await inspectPressed(), 'true', 'Escape clears the selected element before turning Inspect off');
+  await frame.locator('#pay').click();
+  await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('data-uidit-selected') === '1');
   await frame.locator('#pay').click();
   await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('contenteditable') === 'true');
   assert.equal(await page.getByRole('button', { name: 'Text', exact: true }).count(), 0, 'text editing is integrated into Inspect');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  assert.equal(await inspectPressed(), 'true', 'Escape while editing first ends the selection and keeps Inspect active');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   assert.equal(await inspectPressed(), 'false', 'Escape deselects Inspect from the preview');
@@ -181,7 +218,8 @@ try {
   assert.equal(await page.locator('.workspace-drawer').count(), 1, 'Escape from the floating control leaves the panel open');
   await page.keyboard.press('g');
   await page.waitForTimeout(250);
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Settings/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Project/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: /Hide UIDIT controls/ }).click();
   await page.waitForTimeout(250);
   assert.equal(await frame.locator('iframe[data-uidit-ui]').evaluate((el) => el.hidden), true, 'settings hides the in-page controls');
@@ -190,16 +228,21 @@ try {
   assert.equal(await frame.locator('iframe[data-uidit-ui]').evaluate((el) => el.hidden), false, 'U restores the hidden in-page controls');
   await page.keyboard.press('g');
   await page.waitForTimeout(250);
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
   await page.waitForTimeout(200);
 
   // Inspection tags an element; comment and quick style edit persist.
-  await page.getByRole('button', { name: /Feedback/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
   await page.getByRole('button', { name: 'Inspect', exact: true }).click();
   await frame.locator('#pay').click();
   await page.waitForFunction(() => !!document.querySelector('#sel-selector')?.textContent.trim());
   assert.match(await page.locator('#sel-selector').innerText(), /pay|BUTTON/i);
-  await page.locator('[data-testid="comment"]').fill('Make this button full width on mobile.');
+  const commentInput = page.locator('[data-testid="comment"]');
+  await commentInput.fill('Temporary line');
+  await commentInput.press('Shift+Enter');
+  assert.equal(await commentInput.inputValue(), 'Temporary line\n', 'Shift+Enter inserts a newline in a note');
+  await commentInput.fill('Make this button full width on mobile.');
   await page.evaluate(async (base64) => {
     const binary = atob(base64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
     const file = new File([bytes], 'pasted-reference.png', { type: 'image/png' });
@@ -207,7 +250,7 @@ try {
     document.querySelector('[data-testid="comment"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
   }, referencePng.toString('base64'));
   await page.locator('.comment-photo-thumb img').waitFor();
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await commentInput.press('Enter');
   await page.getByText('Make this button full width on mobile.').waitFor();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((comment) => comment.text === 'Make this button full width on mobile.' && comment.attachments?.length === 1));
   await page.locator('details.tools summary').click();
@@ -219,7 +262,8 @@ try {
   assert.equal(await frame.locator('#pay').evaluate((el) => getComputedStyle(el).padding), '16px');
   await page.getByRole('button', { name: 'Design', exact: true }).click();
   // Reselect through page inspection so the overlay has the live element handle.
-  await page.getByRole('button', { name: /Feedback/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
   await page.getByRole('button', { name: 'Inspect', exact: true }).click();
   await frame.locator('#pay').click();
   await page.waitForFunction(() => !!document.querySelector('#sel-selector')?.textContent.trim());
@@ -263,17 +307,42 @@ try {
   await frame.waitForFunction(() => !document.querySelector('#pay')?.style.borderRadius);
   // Context menu comment attaches to the right-clicked heading.
   await frame.locator('h1').click({ button: 'right' });
+  assert.equal(await frame.locator('#uidit-context-menu').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(32, 33, 41)', 'context menu uses the dark workspace surface');
   await frame.locator('[data-context-action="comment"]').click();
-  await frame.locator('#uidit-context-note').fill('Give the heading more breathing room.');
-  await frame.locator('[data-context-action="post"]').click();
-  await page.getByRole('button', { name: /Feedback/ }).click();
+  const contextNote = frame.locator('#uidit-context-note');
+  await contextNote.fill('Give the heading more breathing room.');
+  await contextNote.press('Shift+Enter');
+  assert.equal(await contextNote.inputValue(), 'Give the heading more breathing room.\n', 'Shift+Enter keeps a line break in the context composer');
+  await contextNote.fill('Give the heading more breathing room.');
+  await contextNote.press('Enter');
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
   await page.getByText('Give the heading more breathing room.').waitFor();
   assert.equal(await frame.locator('#uidit-context-menu').isHidden(), true);
   const headingMarker = frame.locator('.uidit-comment-marker[title="Give the heading more breathing room."]');
   await headingMarker.waitFor();
+  const headingMarkerBox = await headingMarker.boundingBox();
+  const headingBox = await frame.locator('h1').boundingBox();
+  assert.ok(Math.abs(headingMarkerBox.x + headingMarkerBox.width / 2 - (headingBox.x + headingBox.width / 2)) < 4, `element note marker follows the target horizontally: marker=${JSON.stringify(headingMarkerBox)} target=${JSON.stringify(headingBox)}`);
+  assert.ok(Math.abs(headingMarkerBox.y + headingMarkerBox.height / 2 - headingBox.y) < 4, `element note marker follows the target vertically: marker=${JSON.stringify(headingMarkerBox)} target=${JSON.stringify(headingBox)}`);
+  const photo = frame.locator('#mug-photo');
+  await photo.click({ button: 'right' });
+  await frame.locator('[data-context-action="comment"]').click();
+  await frame.locator('#uidit-context-note').fill('Keep the product photo anchored.');
+  await frame.locator('[data-context-action="post"]').click();
+  const photoMarker = frame.locator('.uidit-comment-marker[title="Keep the product photo anchored."]');
+  await photoMarker.waitFor();
+  const photoBox = await photo.boundingBox();
+  const photoMarkerBox = await photoMarker.boundingBox();
+  assert.ok(Math.abs(photoMarkerBox.x + photoMarkerBox.width / 2 - (photoBox.x + photoBox.width / 2)) < 4, `photo marker follows the image horizontally: marker=${JSON.stringify(photoMarkerBox)} target=${JSON.stringify(photoBox)}`);
+  assert.ok(Math.abs(photoMarkerBox.y + photoMarkerBox.height / 2 - photoBox.y) < 4, `photo marker follows the image top edge: marker=${JSON.stringify(photoMarkerBox)} target=${JSON.stringify(photoBox)}`);
+  await photoMarker.click({ button: 'right' });
+  await frame.locator('[data-context-action="delete-comment"]').click();
+  await photoMarker.waitFor({ state: 'detached' });
   await headingMarker.click();
   const markerThread = frame.locator('.uidit-comment-thread').filter({ hasText: 'Give the heading more breathing room.' }).first();
-  await markerThread.locator('textarea[aria-label="Reply to comment"]').fill('Can you confirm the preferred spacing?');
+  const replyInput = markerThread.locator('textarea[aria-label="Reply to comment"]');
+  await replyInput.fill('Can you confirm the preferred spacing?');
   await markerThread.getByRole('button', { name: 'Reply' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.replies?.some((r) => r.text === 'Can you confirm the preferred spacing?')));
 
@@ -377,6 +446,23 @@ try {
   await frame.locator('#uidit-context-note').fill('The page should explain delivery timing.');
   await frame.locator('[data-context-action="post"]').click();
   await page.getByText('The page should explain delivery timing.').waitFor();
+  const pageNoteMarker = frame.locator('.uidit-comment-marker[title="The page should explain delivery timing."]');
+  await pageNoteMarker.waitFor();
+  const pageMarkerBox = await pageNoteMarker.boundingBox();
+  assert.ok(pageMarkerBox.x > (await frame.evaluate(() => innerWidth)) * 0.6, 'page note marker follows its saved horizontal anchor');
+  assert.ok(pageMarkerBox.y > (await frame.evaluate(() => innerHeight)) * 0.5, 'page note marker follows its saved vertical anchor');
+  const pageNoteBeforeMove = (await (await fetch(`http://127.0.0.1:${DASH}/api/state`)).json()).session.comments.find((c) => c.text === 'The page should explain delivery timing.');
+  await page.mouse.move(pageMarkerBox.x + pageMarkerBox.width / 2, pageMarkerBox.y + pageMarkerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pageMarkerBox.x + pageMarkerBox.width / 2 - 45, pageMarkerBox.y + pageMarkerBox.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(async (previousX) => {
+    const comment = (await (await fetch('/api/state')).json()).session.comments.find((c) => c.text === 'The page should explain delivery timing.');
+    return comment && Math.abs(comment.anchor.x - previousX) > 0.01;
+  }, pageNoteBeforeMove.anchor.x);
+  await page.waitForTimeout(250);
+  const pageMarkerAfterMove = await pageNoteMarker.boundingBox();
+  assert.ok(pageMarkerAfterMove.x < pageMarkerBox.x - 20, 'the feedback marker follows the persisted drag');
 
   // Draw an arrow and confirm its normalized annotation is saved.
   await frame.locator('h2').first().click({ button: 'right' });
@@ -389,9 +475,51 @@ try {
   await page.mouse.move(box.x + 240, box.y + 310, { steps: 5 });
   await page.mouse.up();
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).session.comments.some((c) => c.drawing?.type === 'arrow'));
+  const drawingGroup = frame.locator('.uidit-drawing');
+  const drawingBox = await drawingGroup.boundingBox();
+  const drawingPathBox = await drawingGroup.locator('path').last().boundingBox();
+  const drawingBeforeMove = (await (await fetch(`http://127.0.0.1:${DASH}/api/state`)).json()).session.comments.find((c) => c.drawing?.type === 'arrow');
+  await page.mouse.move(drawingPathBox.x + drawingPathBox.width / 2, drawingPathBox.y + drawingPathBox.height / 2);
+  await page.mouse.down();
+  assert.equal(await drawingGroup.getAttribute('aria-grabbed'), 'true', 'drawn shapes receive the pointer drag');
+  await page.mouse.move(drawingPathBox.x + drawingPathBox.width / 2 + 40, drawingPathBox.y + drawingPathBox.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(async (previous) => {
+    const drawing = (await (await fetch('/api/state')).json()).session.comments.find((c) => c.drawing?.type === 'arrow')?.drawing;
+    return drawing && Math.abs(drawing.points[0].x - previous.x) > 0.01 && Math.abs(drawing.points[0].y - previous.y) > 0.01;
+  }, drawingBeforeMove.drawing.points[0]);
+  const drawingAfterMove = await drawingGroup.boundingBox();
+  assert.ok(drawingAfterMove.x > drawingBox.x + 20 && drawingAfterMove.y > drawingBox.y + 10, 'the drawn shape follows its persisted drag');
+
+  await frame.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(async () => !(await (await fetch('/api/state')).json()).session.comments.some((c) => c.drawing?.type === 'arrow'));
+  assert.ok((await (await fetch(`http://127.0.0.1:${DASH}/api/state`)).json()).session.comments.some((c) => c.text === 'The page should explain delivery timing.'), 'undo from the preview removes only the most recent shape');
+  await page.locator('.workspace-close').focus();
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(async () => !(await (await fetch('/api/state')).json()).session.comments.some((c) => c.text === 'The page should explain delivery timing.'));
+
+  // A placed marker exposes edit and delete actions from its native context menu.
+  await frame.evaluate(() => document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 640, clientY: 360 })));
+  await frame.locator('[data-context-action="comment"]').click();
+  await frame.locator('#uidit-context-note').fill('Temporary note for marker actions.');
+  await frame.locator('[data-context-action="post"]').click();
+  const temporaryMarker = frame.locator('.uidit-comment-marker[title="Temporary note for marker actions."]');
+  await temporaryMarker.waitFor();
+  await temporaryMarker.click({ button: 'right' });
+  await frame.locator('[data-context-action="edit-comment"]').click();
+  await frame.locator('#uidit-context-note').fill('Edited marker note.');
+  await frame.locator('[data-context-action="save-comment"]').click();
+  const editedMarker = frame.locator('.uidit-comment-marker[title="Edited marker note."]');
+  await editedMarker.waitFor();
+  await editedMarker.click({ button: 'right' });
+  await frame.locator('[data-context-action="delete-comment"]').click();
+  await page.waitForFunction(async () => !(await (await fetch('/api/state')).json()).session.comments.some((comment) => comment.text === 'Edited marker note.'));
+  await editedMarker.waitFor({ state: 'detached' });
 
   // Record a real preview action with a screenshot, stop, then replay it.
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Flows/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Runtime/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Flows', exact: true }).click();
   await page.locator('#uidit-flow-name').fill('Checkout button smoke flow');
   await page.getByRole('button', { name: 'Start recording' }).click();
   await page.waitForTimeout(150);
@@ -419,15 +547,24 @@ try {
   const exportedTest = await downloadPromise;
   assert.match(exportedTest.suggestedFilename(), /Checkout-button-smoke-flow\.spec\.js/);
 
-  // Each workspace section opens, and settings can be saved.
-  // Every section is one click away: the drawer's nav lists all of them.
-  assert.equal(await page.locator('.workspace-tabs button').count(), 8, 'every workspace section is visible without a menu');
-  assert.equal(await page.locator('.workspace-more').count(), 0, 'no section menu is left to hunt through');
-  for (const label of ['Elements', 'Changes', 'Server', 'Agents', 'Settings']) {
+  // Four primary areas keep the drawer compact; related views stay together.
+  assert.equal(await page.locator('.workspace-tabs button').count(), 4, 'the primary navigation is compact');
+  for (const label of ['Review', 'Design', 'Runtime', 'Project']) {
     await page.locator('.workspace-tabs').getByRole('button', { name: new RegExp(`^${label}`) }).click();
     await page.locator('.workspace-content').waitFor();
   }
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Server/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  for (const label of ['Feedback', 'Inspect', 'Changes']) {
+    await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+  }
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Runtime/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Flows', exact: true }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Server', exact: true }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Project/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Agents', exact: true }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Runtime/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Server', exact: true }).click();
   await page.getByText('Configure services', { exact: true }).click();
   const managedServiceCommand = "const h=require('node:http');const s=h.createServer((q,r)=>r.end('service'));s.listen(0,'127.0.0.1',()=>console.log('http://127.0.0.1:'+s.address().port))";
   await page.getByLabel('Services JSON').fill(JSON.stringify([{ id: 'api', name: 'Test API', command: ['node', '-e', managedServiceCommand], cwd: '.', dependencies: [] }]));
@@ -446,26 +583,26 @@ try {
   for (let i = 0; i < 60 && !page.frames().some((item) => item.url().includes('/proxy/')); i++) await page.waitForTimeout(100);
   frame = page.frames().find((item) => item.url().includes('/proxy/'));
   assert.ok(frame, 'primary preview should reload after switching back from the service');
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Settings/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Project/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#uidit-position').selectOption('bottom-right');
   await page.waitForFunction(async () => (await (await fetch('/api/state')).json()).config.ui.position === 'bottom-right');
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Feedback/ }).click();
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
 
   const state = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8'));
   assert.ok(state.elements.length >= 2);
   const headingElement = state.elements.find((element) => /h1/.test(element.selector));
   assert.ok(headingElement?.accessibleName);
   assert.ok(headingElement?.nearbyText);
-  assert.equal(state.comments.length, 4);
+  assert.equal(state.comments.length, 2);
   assert.equal(state.comments.filter((c) => c.elementId).length, 2);
-  assert.equal(state.comments.filter((c) => !c.elementId && !c.drawing).length, 1);
-  assert.equal(state.comments.find((c) => c.drawing)?.drawing.type, 'arrow');
-  const pageNote = state.comments.find((c) => c.text === 'The page should explain delivery timing.');
-  assert.ok(pageNote.anchor && pageNote.anchor.x > 0.6 && pageNote.anchor.y > 0.6, 'right-click page note keeps its page location');
+  assert.equal(state.comments.filter((c) => !c.elementId && !c.drawing).length, 0);
+  assert.equal(state.comments.some((c) => c.drawing), false);
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.replies.length, 3);
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.status, 'needs_info');
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.codeRefs[0]?.file, 'src/components/Checkout.tsx');
-  assert.equal(await frame.locator('.uidit-comment-marker').count(), 3);
+  assert.equal(await frame.locator('.uidit-comment-marker').count(), 2);
   assert.equal(state.edits.filter((e) => e.kind === 'style').length, 4, 'custom style edit and variant properties are recorded');
   assert.equal(state.elements.find((e) => e.selector.includes('pay'))?.page, `http://127.0.0.1:${FIXTURE_PORT}/`);
   assert.deepEqual(errors, [], 'browser page errors');
@@ -477,7 +614,11 @@ try {
   await resolvedCard.locator('.tag').filter({ hasText: 'Resolved' }).waitFor();
   await resolvedCard.getByRole('button', { name: 'Reopen comment' }).click();
   await resolvedCard.locator('.tag').filter({ hasText: 'Open' }).waitFor();
-  await page.locator('.workspace-tabs').getByRole('button', { name: /^Changes/ }).click();
+  const deleteNoteButton = resolvedCard.getByRole('button', { name: 'Delete note' });
+  await deleteNoteButton.click();
+  await page.waitForFunction(async () => !(await (await fetch('/api/state')).json()).session.comments.some((comment) => comment.text === 'Make this button full width on mobile.'));
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Changes/ }).click();
   const spacingEdit = page.locator('.item').filter({ has: page.locator('.item-selector', { hasText: 'padding' }) }).filter({ hasText: '16px' }).first();
   page.once('dialog', (dialog) => dialog.accept('Applied the spacing to the source CSS and verified it.'));
   await spacingEdit.getByRole('button', { name: 'Mark as applied in source' }).click();

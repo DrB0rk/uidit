@@ -16,6 +16,8 @@
   let drawingTool = 'off';
   let visualState = { comments: [], elements: [] };
   let openCommentId = null;
+  const replyDrafts = new Map();
+  let suppressCommentClickId = null;
   let drawStart = null;
   let activeFlowId = null;
   let inputTimer = null;
@@ -86,7 +88,7 @@
     place();
   }
   const bootstrap = document.currentScript;
-  const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:7718';
+  const controlOrigin = bootstrap?.dataset.control || 'http://127.0.0.1:12321';
   // The dashboard may have been opened as localhost while the bridge uses the
   // numeric loopback address. Use the actual embedding origin for postMessage.
   // `data-bridge` adds origins that may host the preview from another local port
@@ -250,9 +252,10 @@
   }
   async function runBrowserAction(id, action = {}) {
     const reply = (value) => post('browser-action-result', { id, ...value });
-    if (!browserInspectionEnabled || typeof id !== 'string') { reply({ ok: false, error: 'Live browser inspection is disabled' }); return; }
+    if ((!browserInspectionEnabled && action.type !== 'share-page-view') || typeof id !== 'string') { reply({ ok: false, error: 'Live browser inspection is disabled' }); return; }
     try {
       if (action.type === 'screenshot') { const screenshot = await captureStepScreenshot(); if (!screenshot) throw new Error('Screenshot could not be captured'); reply({ ok: true, result: { screenshot } }); return; }
+      if (action.type === 'share-page-view') { reply({ ok: true, result: await captureHtmlSnapshot() }); return; }
       if (action.type === 'navigate') {
         if (typeof action.path !== 'string' || !action.path.startsWith('/') || action.path.startsWith('//')) throw new Error('Navigation must use a local path beginning with /');
         const proxiedPath = action.path.startsWith('/proxy/') ? action.path : `/proxy${action.path}`; const next = new URL(proxiedPath, location.origin);
@@ -303,6 +306,76 @@
       if (image.length > 3_400_000) image = await toJpeg(document.documentElement, { quality: 0.32, width, height, canvasWidth: Math.round(width * 0.5), canvasHeight: Math.round(height * 0.5), filter: (node) => !node?.hasAttribute?.('data-uidit-ui') });
       return image.length <= 3_400_000 ? image : null;
     } finally { mask.remove(); }
+  };
+  const captureHtmlSnapshot = async () => {
+    const width = Math.max(320, Math.min(window.innerWidth || 1280, 10000));
+    const height = Math.max(240, Math.min(window.innerHeight || 900, 10000));
+    const source = document.documentElement;
+    const clone = source.cloneNode(true);
+    const sourceNodes = [source, ...source.querySelectorAll('*')];
+    const cloneNodes = [clone, ...clone.querySelectorAll('*')];
+    let embeddedAssetBytes = 0, assetFetches = 0;
+    const assetCache = new Map();
+    const inlineLocalAsset = async (rawUrl) => {
+      try {
+        const url = new URL(rawUrl, location.href);
+        if (url.origin !== location.origin || !url.pathname.startsWith('/proxy/') || embeddedAssetBytes >= 1_200_000 || assetFetches >= 20) return null;
+        if (assetCache.has(url.href)) return assetCache.get(url.href);
+        assetCache.set(url.href, null); assetFetches += 1;
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 700);
+        const response = await fetch(url.href, { credentials: 'same-origin', signal: controller.signal }).finally(() => clearTimeout(timeout));
+        const mime = response.headers.get('content-type')?.split(';')[0] || '';
+        const blob = await response.blob();
+        if (!response.ok || !/^image\/(?:jpeg|png|gif|webp|avif)$/.test(mime) || blob.size > 400_000 || embeddedAssetBytes + blob.size > 1_200_000) return null;
+        embeddedAssetBytes += blob.size;
+        const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        const dataUrl = `data:${mime};base64,${btoa(binary)}`; assetCache.set(url.href, dataUrl); return dataUrl;
+      } catch { return null; }
+    };
+    const visualProperties = 'display visibility position inset top right bottom left z-index box-sizing width min-width max-width height min-height max-height margin margin-top margin-right margin-bottom margin-left padding padding-top padding-right padding-bottom padding-left overflow overflow-x overflow-y flex flex-direction flex-wrap flex-grow flex-shrink flex-basis align-items align-content align-self justify-content justify-items gap row-gap column-gap grid grid-template-columns grid-template-rows grid-column grid-row order float clear transform transform-origin opacity color background-color background-image background-size background-position background-repeat border border-top border-right border-bottom border-left border-radius box-shadow object-fit object-position font-family font-size font-style font-weight line-height letter-spacing text-align text-decoration text-transform white-space word-break overflow-wrap list-style list-style-type cursor';
+    const properties = visualProperties.split(' ');
+    for (let index = 0; index < sourceNodes.length; index += 1) {
+      const original = sourceNodes[index], target = cloneNodes[index];
+      if (!target || original.closest?.('[data-uidit-ui]')) continue;
+      const computed = getComputedStyle(original);
+      const declarations = [];
+      for (const name of properties) {
+        let value = computed.getPropertyValue(name);
+        if (name === 'background-image' && value.includes('url(')) {
+          const matches = [...value.matchAll(/url\((?:"|')?(.*?)(?:"|')?\)/g)];
+          for (const match of matches) { const dataUrl = await inlineLocalAsset(match[1]); if (dataUrl) value = value.replace(match[0], `url("${dataUrl}")`); }
+        }
+        declarations.push(`${name}:${value}`);
+      }
+      target.setAttribute('style', declarations.join(';'));
+      if (original.matches?.('input,textarea,select,[contenteditable="true"]')) {
+        target.removeAttribute('value'); target.removeAttribute('checked'); target.removeAttribute('selected');
+        if (target.matches('textarea') || target.isContentEditable) target.textContent = '';
+      }
+    }
+    clone.querySelectorAll('[data-uidit-ui],script,noscript,iframe,object,embed,base,meta[http-equiv],link,style').forEach((node) => node.remove());
+    for (const node of [clone, ...clone.querySelectorAll('*')]) {
+      for (const attribute of [...node.attributes]) {
+        if (/^on/i.test(attribute.name) || (['href','src','xlink:href','action','formaction'].includes(attribute.name.toLowerCase()) && /^\s*javascript:/i.test(attribute.value))) node.removeAttribute(attribute.name);
+      }
+    }
+    clone.querySelectorAll('form').forEach((form) => form.removeAttribute('action'));
+    const imagePairs = sourceNodes.map((node, index) => node.matches?.('img') ? [node, cloneNodes[index]] : null).filter(Boolean);
+    for (const [original, image] of imagePairs) {
+      if (!image?.isConnected) continue;
+      image.removeAttribute('srcset');
+      const embedded = await inlineLocalAsset(original?.currentSrc || image.getAttribute('src') || '');
+      if (embedded) image.setAttribute('src', embedded);
+      else {
+        try { const asset = new URL(image.getAttribute('src') || '', location.href); if (asset.origin === location.origin && asset.pathname.startsWith('/proxy/')) image.setAttribute('src', `${window.__UIDIT_TARGET__}${asset.pathname.slice('/proxy'.length)}${asset.search}`); }
+        catch { image.removeAttribute('src'); }
+      }
+    }
+    clone.setAttribute('data-uidit-snapshot', '1');
+    const html = `<!doctype html>${clone.outerHTML}`;
+    if (html.length > 2_000_000) throw new Error('HTML snapshot exceeds 2 MB; use a smaller page or a page image');
+    return { html, width, height, url: realPage() };
   };
   const recordStep = (type, el, action = type) => {
     if (!activeFlowId || !el || el.closest?.('[data-uidit-ui]')) return;
@@ -373,7 +446,7 @@
   const visuals = document.createElement('div');
   visuals.id = 'uidit-visuals';
   visuals.setAttribute('data-uidit-ui', '1');
-  visuals.style.cssText = 'position:absolute;left:0;top:0;z-index:2147483646;pointer-events:none;overflow:visible;';
+  visuals.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483646;pointer-events:none;overflow:visible;';
   document.documentElement.append(visuals);
   const svgNS = 'http://www.w3.org/2000/svg';
   const anchorStatusCache = new Map();
@@ -394,10 +467,15 @@
     try { if (record?.selector) current = document.querySelector(record.selector); } catch {}
     if (current) {
       const score = anchorMatch(anchor, current);
-      if (score >= .72 || (!anchor.accessibleName && !anchor.text && !anchor.role)) return { status: 'located', element: current, candidates: [] };
+      const sameImage = anchor.tag?.toLowerCase() === 'img' && current.tagName === 'IMG'
+        && (!anchor.accessibleName || fold(current.getAttribute('aria-label') || current.alt || current.title) === fold(anchor.accessibleName))
+        && (!anchor.attributes?.src || current.getAttribute('src') === anchor.attributes.src);
+      if (sameImage) return { status: 'located', element: current, candidates: [] };
+      if (score >= .7 || (!anchor.accessibleName && !anchor.text && !anchor.role)) return { status: 'located', element: current, candidates: [] };
     }
-    const nodes = [...document.querySelectorAll('a,button,input,select,textarea,[role],[data-testid],[data-test],h1,h2,h3,p,section,main')].slice(0, 900);
-    const ranked = nodes.map((element) => ({ element, score: anchorMatch(anchor, element) })).filter((entry) => entry.score >= .72).sort((a,b)=>b.score-a.score);
+    const nodes = [...document.querySelectorAll('a,button,input,select,textarea,img,[role],[data-testid],[data-test],h1,h2,h3,p,section,main')].slice(0, 900);
+    const threshold = anchor.tag?.toLowerCase() === 'img' ? .64 : .7;
+    const ranked = nodes.map((element) => ({ element, score: anchorMatch(anchor, element) })).filter((entry) => entry.score >= threshold).sort((a,b)=>b.score-a.score);
     if (!ranked.length) return { status: 'missing', element: null, candidates: [] };
     const candidates = ranked.slice(0,3).map(({element,score})=>({ ...describe(element), score }));
     if (ranked[1] && ranked[0].score - ranked[1].score < .12) return { status: 'ambiguous', element: null, candidates };
@@ -412,11 +490,72 @@
       height: Math.max(document.body?.scrollHeight ?? 0, innerHeight),
     };
   }
+  function moveFeedback(comment, dx, dy) {
+    const { width, height } = pageSize();
+    let patch;
+    if (comment.drawing && Array.isArray(comment.drawing.points)) {
+      patch = { drawing: { ...comment.drawing, points: comment.drawing.points.map((point) => ({
+        x: Math.max(0, Math.min(1, point.x + dx / width)),
+        y: Math.max(0, Math.min(1, point.y + dy / height)),
+      })) } };
+    } else {
+      const element = comment.elementId && locateCommentTarget(comment, visualState.elements.find((item) => item.id === comment.elementId)).element;
+      if (element) {
+        const offset = comment.markerOffset ?? { x: 0, y: 0 };
+        patch = { markerOffset: { x: Math.max(-1, Math.min(1, offset.x + dx / width)), y: Math.max(-1, Math.min(1, offset.y + dy / height)) } };
+      } else {
+        const anchor = comment.anchor ?? { x: (innerWidth - 34 + scrollX) / width, y: (24 + scrollY) / height };
+        patch = { anchor: { x: Math.max(0, Math.min(1, anchor.x + dx / width)), y: Math.max(0, Math.min(1, anchor.y + dy / height)) } };
+      }
+    }
+    Object.assign(comment, patch);
+    renderVisuals();
+    post('comment-move', { commentId: comment.id, patch });
+  }
+  function bindFeedbackMove(node, comment, { shape = false, x = 0, y = 0 } = {}) {
+    let drag = null;
+    node.setAttribute('aria-grabbed', 'false');
+    node.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.stopPropagation();
+      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+      node.setAttribute('aria-grabbed', 'true');
+      node.setPointerCapture?.(event.pointerId);
+    });
+    node.addEventListener('pointermove', (event) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+      if (Math.hypot(dx, dy) < 3) return;
+      drag.moved = true;
+      event.preventDefault();
+      if (shape) node.setAttribute('transform', `translate(${dx} ${dy})`);
+      else { node.style.left = `${x + dx}px`; node.style.top = `${y + dy}px`; }
+    });
+    const finish = (event) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const current = drag; drag = null;
+      node.setAttribute('aria-grabbed', 'false');
+      if (current.moved) {
+        if (!shape) suppressCommentClickId = comment.id;
+        moveFeedback(comment, event.clientX - current.x, event.clientY - current.y);
+        if (!shape) setTimeout(() => { if (suppressCommentClickId === comment.id) suppressCommentClickId = null; }, 0);
+      }
+    };
+    node.addEventListener('pointerup', finish);
+    node.addEventListener('pointercancel', () => { drag = null; node.setAttribute('aria-grabbed', 'false'); node.removeAttribute('transform'); });
+    node.addEventListener('keydown', (event) => {
+      const moves = { ArrowLeft: [-8, 0], ArrowRight: [8, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] };
+      const delta = moves[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      moveFeedback(comment, delta[0], delta[1]);
+    });
+  }
   function renderVisuals() {
     const { width, height } = pageSize();
-    visuals.style.width = `${width}px`; visuals.style.height = `${height}px`; visuals.replaceChildren();
+    visuals.style.width = `${innerWidth}px`; visuals.style.height = `${innerHeight}px`; visuals.replaceChildren();
     const svg = document.createElementNS(svgNS, 'svg');
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('width', width); svg.setAttribute('height', height);
+    svg.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`); svg.setAttribute('width', innerWidth); svg.setAttribute('height', innerHeight);
     svg.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;';
     const defs = document.createElementNS(svgNS, 'defs');
     const marker = document.createElementNS(svgNS, 'marker'); marker.id = 'uidit-arrowhead'; marker.setAttribute('markerWidth','10'); marker.setAttribute('markerHeight','8'); marker.setAttribute('refX','8'); marker.setAttribute('refY','4'); marker.setAttribute('orient','auto');
@@ -426,36 +565,48 @@
     const visibleComments = visualState.comments.filter((c) => !c.resolved && matchesPage(c));
     for (const c of visibleComments) {
       if (!c.drawing || !Array.isArray(c.drawing.points)) continue;
-      const pts = c.drawing.points.map((p) => ({ x: p.x * width, y: p.y * height })); if (!pts.length) continue;
+      const pts = c.drawing.points.map((p) => ({ x: p.x * width - scrollX, y: p.y * height - scrollY })); if (!pts.length) continue;
+      const group = document.createElementNS(svgNS, 'g');
+      group.classList.add('uidit-drawing'); group.dataset.commentId = c.id; group.tabIndex = 0; group.setAttribute('role', 'button'); group.setAttribute('aria-label', `Move ${c.drawing.type} annotation`); group.style.cursor = 'grab';
       const shape = document.createElementNS(svgNS, c.drawing.type === 'ellipse' ? 'ellipse' : c.drawing.type === 'rectangle' ? 'rect' : 'path');
+      shape.style.pointerEvents = 'all';
       shape.setAttribute('fill', c.drawing.type === 'ellipse' || c.drawing.type === 'rectangle' ? 'rgba(120,91,255,.10)' : 'none'); shape.setAttribute('stroke','#785bff'); shape.setAttribute('stroke-width','3'); shape.setAttribute('stroke-linecap','round'); shape.setAttribute('stroke-linejoin','round');
       if (c.drawing.type === 'rectangle') { shape.setAttribute('x',Math.min(pts[0].x,pts.at(-1).x)); shape.setAttribute('y',Math.min(pts[0].y,pts.at(-1).y)); shape.setAttribute('width',Math.abs(pts.at(-1).x-pts[0].x)); shape.setAttribute('height',Math.abs(pts.at(-1).y-pts[0].y)); }
       else if (c.drawing.type === 'ellipse') { shape.setAttribute('cx',(pts[0].x+pts.at(-1).x)/2); shape.setAttribute('cy',(pts[0].y+pts.at(-1).y)/2); shape.setAttribute('rx',Math.max(2,Math.abs(pts.at(-1).x-pts[0].x)/2)); shape.setAttribute('ry',Math.max(2,Math.abs(pts.at(-1).y-pts[0].y)/2)); }
       else { shape.setAttribute('d',pts.map((p,i)=>`${i?'L':'M'}${p.x} ${p.y}`).join(' ')); if (c.drawing.type === 'arrow') shape.setAttribute('marker-end','url(#uidit-arrowhead)'); }
-      const title = document.createElementNS(svgNS,'title'); title.textContent = c.text; shape.append(title); svg.append(shape);
+      if (c.drawing.type === 'arrow' || c.drawing.type === 'freehand') {
+        const hitTarget = shape.cloneNode(false);
+        hitTarget.removeAttribute('marker-end');
+        hitTarget.setAttribute('stroke', 'transparent'); hitTarget.setAttribute('stroke-width', '18');
+        hitTarget.style.pointerEvents = 'stroke';
+        group.append(hitTarget);
+      }
+      const title = document.createElementNS(svgNS,'title'); title.textContent = c.text; shape.append(title); group.append(shape); bindFeedbackMove(group, c, { shape: true }); svg.append(group);
     }
     visuals.append(svg);
     visibleComments.filter((c) => !c.drawing).forEach((c, index) => {
       const record = elements.get(c.elementId); const located = c.elementId ? locateCommentTarget(c, record) : { status: 'missing', element: null, candidates: [] }; const el = located.element;
       const signature = `${located.status}:${located.candidates.map((candidate)=>candidate.selector).join('|')}`;
       if (c.elementId && anchorStatusCache.get(c.id) !== signature) { anchorStatusCache.set(c.id, signature); post('anchor-status', { commentId: c.id, status: located.status, candidates: located.candidates }); }
-      const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.setAttribute('data-uidit-ui','1'); markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
-      markerNode.style.cssText='position:absolute;pointer-events:auto;left:0;top:0;transform:translate(-50%,-50%);width:27px;height:27px;border:2px solid white;border-radius:50%;background:#785bff;color:white;font:700 12px system-ui;box-shadow:0 3px 14px #17132270;cursor:pointer;';
-      const rect=el?.getBoundingClientRect(); const hasAnchor=Number.isFinite(c.anchor?.x)&&Number.isFinite(c.anchor?.y); const x=rect?rect.left+scrollX+rect.width/2:hasAnchor?c.anchor.x*width:width-34; const y=rect?rect.top+scrollY:hasAnchor?c.anchor.y*height:24+index*34;
+      const markerNode = document.createElement('button'); markerNode.type='button'; markerNode.className='uidit-comment-marker'; markerNode.setAttribute('data-uidit-ui','1'); markerNode.dataset.uiditCommentId=c.id; markerNode.textContent=String(index+1); markerNode.title=c.text; markerNode.setAttribute('aria-label',`Review comment: ${c.text}`);
+      markerNode.style.cssText='position:fixed;pointer-events:auto;left:0;top:0;transform:translate(-50%,-50%);width:27px;height:27px;border:2px solid white;border-radius:50%;background:#785bff;color:white;font:700 12px system-ui;box-shadow:0 3px 14px #17132270;cursor:pointer;';
+      const rect=el?.getBoundingClientRect(); const hasAnchor=Number.isFinite(c.anchor?.x)&&Number.isFinite(c.anchor?.y); const offset=c.markerOffset??{x:0,y:0}; const x=rect?rect.left+rect.width/2+offset.x*width:hasAnchor?c.anchor.x*width-scrollX:innerWidth-34; const y=rect?rect.top+offset.y*height:hasAnchor?c.anchor.y*height-scrollY:24+index*34;
       markerNode.style.left=`${x}px`; markerNode.style.top=`${y}px`;
+      markerNode.setAttribute('aria-description', 'Drag to move this feedback marker. Use arrow keys while focused to nudge it.');
+      bindFeedbackMove(markerNode, c, { x, y });
       const pop=document.createElement('section');pop.className='uidit-comment-thread';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Comment thread');pop.hidden=c.id!==openCommentId;pop.setAttribute('data-uidit-ui','1');
-      pop.style.cssText='position:absolute;z-index:1;left:0;top:0;transform:translate(18px,14px);width:min(300px,calc(100vw - 32px));max-height:min(360px,calc(100vh - 48px));overflow:auto;padding:12px;border:1px solid #3d3a4b;border-radius:11px;background:#211f2b;color:#f5f4fa;font:12px/1.45 system-ui;box-shadow:0 10px 32px #17132255;pointer-events:auto;';
+      pop.style.cssText='position:fixed;z-index:1;left:0;top:0;transform:translate(18px,14px);width:min(300px,calc(100vw - 32px));max-height:min(360px,calc(100vh - 48px));overflow:auto;padding:12px;border:1px solid #3d3a4b;border-radius:11px;background:#211f2b;color:#f5f4fa;font:12px/1.45 system-ui;box-shadow:0 10px 32px #17132255;pointer-events:auto;';
       pop.style.left=`${x}px`; pop.style.top=`${y}px`;
       const head=document.createElement('div');head.textContent=`Comment ${index+1}`;head.style.cssText='font-weight:700;font-size:11px;color:#c9c4dc;margin-bottom:6px;';
       const original=document.createElement('p');original.textContent=c.text;original.style.cssText='margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere;';
       const replies=document.createElement('div');replies.style.cssText='display:grid;gap:6px;margin:7px 0;';
       (Array.isArray(c.replies)?c.replies:[]).forEach((reply)=>{const item=document.createElement('div');item.style.cssText='padding:7px 8px;border-radius:7px;background:#302e3b;';const author=document.createElement('strong');author.textContent=reply.author==='agent'?'Agent':'You';author.style.cssText='display:block;margin-bottom:2px;font-size:10px;color:#c4b9ff;';const text=document.createElement('span');text.textContent=reply.text;item.append(author,text);replies.append(item);});
-      const input=document.createElement('textarea');input.maxLength=4000;input.setAttribute('aria-label','Reply to comment');input.placeholder='Reply or ask the agent a question';input.style.cssText='display:block;box-sizing:border-box;width:100%;min-height:58px;resize:vertical;padding:8px;border:1px solid #4c4959;border-radius:7px;background:#17161f;color:#fff;font:12px/1.45 system-ui;';
-      const send=document.createElement('button');send.type='button';send.textContent='Reply';send.disabled=true;send.style.cssText='display:block;margin:7px 0 0 auto;padding:6px 10px;border:0;border-radius:6px;background:#a99af5;color:#171522;font:600 11px system-ui;cursor:pointer;';
-      input.addEventListener('input',()=>{send.disabled=!input.value.trim();});
-      send.addEventListener('click',async()=>{if(!input.value.trim())return;send.disabled=true;send.textContent='Sending…';try{await api('/comment-reply','POST',{commentId:c.id,text:input.value.trim()});input.value='';openCommentId=null;renderVisuals();}catch(err){send.disabled=false;send.textContent='Retry';post('error',{message:err.message});}});
+      const input=document.createElement('textarea');input.maxLength=4000;input.setAttribute('aria-label','Reply to comment');input.placeholder='Reply or ask the agent a question';input.style.cssText='display:block;box-sizing:border-box;width:100%;min-height:58px;resize:vertical;padding:8px;border:1px solid #4c4959;border-radius:7px;background:#17161f;color:#fff;font:12px/1.45 system-ui;';input.value=replyDrafts.get(c.id)||'';
+      const send=document.createElement('button');send.type='button';send.textContent='Reply';send.disabled=!input.value.trim();send.style.cssText='display:block;margin:7px 0 0 auto;padding:6px 10px;border:0;border-radius:6px;background:#a99af5;color:#171522;font:600 11px system-ui;cursor:pointer;';
+      input.addEventListener('input',()=>{replyDrafts.set(c.id,input.value);send.disabled=!input.value.trim();});
+      send.addEventListener('click',async()=>{if(!input.value.trim())return;send.disabled=true;send.textContent='Sending…';try{await api('/comment-reply','POST',{commentId:c.id,text:input.value.trim()});replyDrafts.delete(c.id);input.value='';openCommentId=null;renderVisuals();}catch(err){send.disabled=false;send.textContent='Retry';post('error',{message:err.message});}});
       pop.append(head,original,replies,input,send);visuals.append(pop);
-      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();openCommentId=openCommentId===c.id?null:c.id;visuals.querySelectorAll('.uidit-comment-thread').forEach((thread)=>thread.hidden=true);pop.hidden=openCommentId!==c.id;if(el){restoreSelected();state.selected={el,record:describe(el)};el.setAttribute('data-uidit-selected','1');}});
+      markerNode.addEventListener('click',(ev)=>{ev.stopPropagation();if(suppressCommentClickId===c.id){suppressCommentClickId=null;return}openCommentId=openCommentId===c.id?null:c.id;visuals.querySelectorAll('.uidit-comment-thread').forEach((thread)=>thread.hidden=true);pop.hidden=openCommentId!==c.id;if(el){restoreSelected();state.selected={el,record:describe(el)};el.setAttribute('data-uidit-selected','1');}});
       visuals.append(markerNode);
     });
   }
@@ -474,7 +625,19 @@
     drawSvg.addEventListener('pointerup',async e=>{if(!drawStart||!drawShape)return;const start=drawStart;const end={x:e.clientX,y:e.clientY};drawStart=null;const {width:pageWidth,height:pageHeight}=pageSize();const points=tool==='freehand'?parsePath(drawShape.getAttribute('d')).slice(0,500).map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight})):[start,end].map(p=>({x:(p.x+scrollX)/pageWidth,y:(p.y+scrollY)/pageHeight}));drawSvg.remove();drawSvg=null;document.documentElement.style.cursor='';drawingTool='off';try{await api('/comment','POST',{text:`${tool[0].toUpperCase()+tool.slice(1)} annotation for the coding agent`,elementId:null,page:realPage(),drawing:{type:tool,points,pageWidth,pageHeight}});post('drawn',{tool})}catch(err){post('error',{message:err.message})}});
   }
   function parsePath(d){return [...(d||'').matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map(m=>({x:Number(m[1]),y:Number(m[2])}));}
-  addEventListener('resize',renderVisuals); addEventListener('scroll',()=>{ if (!document.activeElement?.closest?.('.uidit-comment-thread')) renderVisuals(); },true);
+  function renderVisualsPreservingThread() {
+    const thread = document.activeElement?.closest?.('.uidit-comment-thread');
+    const input = thread?.querySelector('textarea');
+    const value = input?.value;
+    const start = input?.selectionStart;
+    const end = input?.selectionEnd;
+    renderVisuals();
+    if (input && openCommentId) {
+      const nextInput = visuals.querySelector('.uidit-comment-thread:not([hidden]) textarea');
+      if (nextInput) { nextInput.value = value; nextInput.focus({ preventScroll: true }); nextInput.setSelectionRange(start, end); }
+    }
+  }
+  addEventListener('resize',renderVisuals); addEventListener('scroll',renderVisualsPreservingThread,true);
 
   // Highlight via attribute, never inline styles: the element's own style attribute
   // must stay pristine so recorded `before` values are the real page values.
@@ -565,13 +728,37 @@
   let contextTarget = null;
   let contextPoint = null;
   let contextElementId = null;
+  let contextCommentId = null;
   function closeContextMenu() {
     contextMenu.hidden = true;
     if (contextTarget && contextTarget !== state.selected?.el) paint(contextTarget, false);
     contextTarget = null;
     contextPoint = null;
+    contextCommentId = null;
   }
   function openContextMenu(ev) {
+    const commentMarker = ev.target.closest?.('.uidit-comment-marker');
+    if (commentMarker) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const comment = visualState.comments.find((item) => item.id === commentMarker.dataset.uiditCommentId);
+      if (!comment) return;
+      contextCommentId = comment.id;
+      contextTarget = commentMarker;
+      contextPoint = { x: ev.clientX, y: ev.clientY };
+      contextMenu.setAttribute('role', 'menu');
+      contextMenu.setAttribute('aria-label', 'Comment actions');
+      contextMenu.innerHTML = `<div class="uidit-context-title">Comment <span>Review note</span></div><button type="button" role="menuitem" data-context-action="edit-comment">Edit comment</button><button type="button" role="menuitem" data-context-action="delete-comment">Delete comment</button>`;
+      contextMenu.hidden = false;
+      contextMenu.style.left = `${Math.max(8, Math.min(ev.clientX, innerWidth - 250))}px`;
+      contextMenu.style.top = `${Math.max(8, Math.min(ev.clientY, innerHeight - 120))}px`;
+      requestAnimationFrame(() => {
+        const rect = contextMenu.getBoundingClientRect();
+        contextMenu.style.left = `${Math.max(8, Math.min(ev.clientX, innerWidth - rect.width - 8))}px`;
+        contextMenu.style.top = `${Math.max(8, Math.min(ev.clientY, innerHeight - rect.height - 8))}px`;
+      });
+      return;
+    }
     if (ev.target.closest?.('[data-uidit-ui]')) return;
     ev.preventDefault();
     contextTarget = ev.target.nodeType === 1 ? ev.target : ev.target.parentElement;
@@ -601,6 +788,36 @@
     if (!button) return;
     const action = button.dataset.contextAction;
     try {
+      if (action === 'edit-comment') {
+        const comment = visualState.comments.find((item) => item.id === contextCommentId);
+        if (!comment) { closeContextMenu(); return; }
+        contextMenu.setAttribute('role', 'dialog');
+        contextMenu.setAttribute('aria-label', 'Edit comment');
+        contextMenu.innerHTML = `<div class="uidit-context-title">Edit comment <span>Review note</span></div><label class="uidit-context-sr" for="uidit-context-note">Comment text</label><textarea id="uidit-context-note" maxlength="4000"></textarea><div class="uidit-context-actions"><button type="button" data-context-action="cancel">Cancel</button><button type="button" class="primary" data-context-action="save-comment" disabled>Save</button></div>`;
+        const textarea = contextMenu.querySelector('textarea');
+        textarea.value = comment.text;
+        const submit = contextMenu.querySelector('[data-context-action="save-comment"]');
+        const updateEnabled = () => { submit.disabled = !textarea.value.trim() || textarea.value.trim() === comment.text; };
+        textarea.addEventListener('input', updateEnabled);
+        textarea.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+          event.preventDefault();
+          if (!submit.disabled) submit.click();
+        });
+        textarea.focus();
+        return;
+      }
+      if (action === 'save-comment') {
+        const text = contextMenu.querySelector('textarea')?.value.trim();
+        if (!text || !contextCommentId) return;
+        await api('/comment-update', 'POST', { commentId: contextCommentId, text });
+        closeContextMenu(); renderVisuals(); return;
+      }
+      if (action === 'delete-comment') {
+        if (!contextCommentId) return;
+        await api('/comment-delete', 'POST', { commentId: contextCommentId });
+        closeContextMenu(); renderVisuals(); return;
+      }
       if (action === 'comment') {
         const target = contextTarget && contextTarget !== document.body && contextTarget !== document.documentElement ? contextTarget : null;
         if (target) { const element = await select(target); contextElementId = element?.id ?? null; }
@@ -612,6 +829,11 @@
         const textarea = contextMenu.querySelector('textarea');
         const submit = contextMenu.querySelector('[data-context-action="post"]');
         textarea.addEventListener('input', () => { submit.disabled = !textarea.value.trim(); });
+        textarea.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+          event.preventDefault();
+          if (!submit.disabled) submit.click();
+        });
         textarea.focus();
         contextMenu.dataset.composer = '1';
         return;
@@ -714,7 +936,9 @@
     ev.preventDefault();
     ev.stopPropagation();
     const selected = state.selected?.el;
-    if (selected && (selected === ev.target || selected.contains(ev.target))) {
+    // A child is a separate inspect target. Only a second click on the exact
+    // same element switches into inline text editing.
+    if (selected && selected === ev.target) {
       beginTextEditing();
       placeTextCaret(ev);
       return;
@@ -740,24 +964,25 @@
   document.addEventListener('click', onClick, true);
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('keydown', (ev) => {
-    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     const key = ev.key.toLowerCase();
+    const typing = /INPUT|TEXTAREA|SELECT/.test(ev.target?.tagName ?? '') || ev.target?.isContentEditable === true;
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && key === 'z' && !typing) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      post('shortcut', { key: 'undo' });
+      return;
+    }
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (key === 'escape') {
       ev.preventDefault();
       ev.stopPropagation();
-      closeContextMenu();
-      setDrawingTool('off');
-      if (textEditing) finishTextEditing(true).catch((err) => post('error', { message: err.message }));
-      if (state.mode !== 'off') {
-        state.mode = 'off';
-        post('mode', { mode: 'off' });
-      }
+      handleEscape();
       return;
     }
     if (/INPUT|TEXTAREA|SELECT/.test(ev.target?.tagName ?? '') || ev.target?.isContentEditable === true) return;
     // The panel owns review state, so the preview reports these instead of acting on them.
     if (key === 'i' || key === 'c' || key === 'g') post('shortcut', { key });
-  });
+  }, true);
 
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
@@ -825,6 +1050,7 @@
       return;
     }
     if (msg.type === 'state') {
+      if (['light', 'dark'].includes(msg.theme)) document.documentElement.dataset.uiditTheme = msg.theme;
       setBrowserInspection(msg.browserInspection === true);
       if (!positionPinned) setFloating(msg.position === 'bottom-right' ? innerWidth - BUTTON - 24 : 24, innerHeight - BUTTON - 24, false);
       if (Array.isArray(msg.comments) && Array.isArray(msg.elements)) { visualState = { comments: msg.comments, elements: msg.elements }; renderVisuals(); }
@@ -868,15 +1094,12 @@
     }
     if (msg.type === 'browserControlRevoke') { setBrowserInspection(false); return; }
     if (msg.type === 'theme' && ['light', 'dark'].includes(msg.theme)) {
+      document.documentElement.dataset.uiditTheme = msg.theme;
       controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'theme', theme: msg.theme }, controlOrigin); return;
     }
     if (msg.type === 'drawMode') { setDrawingTool(msg.tool); return; }
     if (msg.type === 'escape') {
-      closeContextMenu();
-      setDrawingTool('off');
-      if (textEditing) finishTextEditing(true).catch((err) => post('error', { message: err.message }));
-      state.mode = 'off';
-      post('mode', { mode: 'off' });
+      handleEscape();
       controls.contentWindow?.postMessage({ source: 'uidit-preview', type: 'escape' }, controlOrigin);
     }
     if (msg.type === 'hideControls') { controls.hidden = true; return; }
@@ -1009,6 +1232,34 @@
       restoreSelected();
       post('selected', { element: null });
     }
+  }
+
+  function handleEscape() {
+    if (!contextMenu.hidden) { closeContextMenu(); return; }
+    if (drawingTool !== 'off') { setDrawingTool('off'); return; }
+    const clearSelection = () => {
+      if (state.selected) {
+        const selectedEl = state.selected.el;
+        restoreSelected();
+        if (hoverEl === selectedEl) {
+          paint(hoverEl, false);
+          hoverEl = null;
+        }
+        post('selected', { element: null });
+        return;
+      }
+      if (state.mode !== 'off') {
+        state.mode = 'off';
+        post('mode', { mode: 'off' });
+      }
+    };
+    if (textEditing) {
+      finishTextEditing(true)
+        .then(clearSelection)
+        .catch((err) => post('error', { message: err.message }));
+      return;
+    }
+    clearSelection();
   }
 
   post('ready', { url: realPage(), title: document.title });

@@ -18,6 +18,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
   let browserContext = null;
   let browserDiagnostics = [];
   const browserActionWaiters = new Map();
+  const pendingBrowserActions = new Map();
   let lastRevision = readSession(cwd).revision ?? 0;
 
   const push = (event, data) => {
@@ -37,11 +38,12 @@ export function createHub({ cwd = process.cwd() } = {}) {
   const requestBrowserAction = (action, timeout = 12000) => new Promise((resolve, reject) => {
     if (!clients.size) return reject(new Error('No UIDIT dashboard is connected to the live preview'));
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { browserActionWaiters.delete(id); reject(new Error('Browser action timed out')); }, Math.max(1000, Math.min(30000, timeout)));
+    const timer = setTimeout(() => { browserActionWaiters.delete(id); pendingBrowserActions.delete(id); reject(new Error('Browser action timed out')); }, Math.max(1000, Math.min(30000, timeout)));
+    pendingBrowserActions.set(id, action.type);
     browserActionWaiters.set(id, (result) => { clearTimeout(timer); browserActionWaiters.delete(id); result?.ok ? resolve(result) : reject(new Error(result?.error ?? 'Browser action failed')); });
     push('browser-action', { id, action });
   });
-  const resolveBrowserAction = (id, result) => { const resolve = browserActionWaiters.get(id); if (!resolve) return false; resolve(result); return true; };
+  const resolveBrowserAction = (id, result) => { const resolve = browserActionWaiters.get(id); if (!resolve) return false; pendingBrowserActions.delete(id); resolve(result); return true; };
 
   function readConfigSafe(dir) {
     try {
@@ -96,6 +98,7 @@ export function createHub({ cwd = process.cwd() } = {}) {
     notifyBrowserDiagnostics,
     requestBrowserAction,
     resolveBrowserAction,
+    isBrowserActionPending(id, type) { return pendingBrowserActions.get(id) === type; },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     watch,
     close() {

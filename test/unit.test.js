@@ -17,6 +17,8 @@ import { createServiceManager } from '../src/server/process-manager.js';
 import { createSelectiveVerifier } from '../src/server/verification.js';
 import { describeReviewActions, runReviewAction } from '../src/actions/review.js';
 import { assertAgentWritesAllowed } from '../src/server/agent-policy.js';
+import { startMcpServer } from '../src/server/mcp/server.js';
+import { CollaborationManager } from '../src/server/collaboration.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -39,6 +41,76 @@ test('init is idempotent and keeps existing feedback', () => {
   const second = store.init(cwd);
   assert.equal(second.created, false);
   assert.equal(store.readSession(cwd).comments.length, 1);
+});
+
+test('stopping collaboration clears its local owner credentials after relay shutdown', async () => {
+  const cwd = tmpProject();
+  const runtime = path.join(cwd, '.uidit', 'runtime');
+  const statePath = path.join(runtime, 'collaboration.json');
+  fs.mkdirSync(runtime, { recursive: true });
+  const config = { relayUrl: 'https://share.uidit.app', roomId: 'room-1', ownerToken: 'owner-secret', inviteUrl: 'https://share.uidit.app/room/room-1#invite' };
+  fs.writeFileSync(statePath, JSON.stringify(config));
+  const manager = new CollaborationManager({ cwd, hub: { subscribe: () => () => {}, notifyCollaboration() {} } });
+  manager.config = config;
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, options) => { request = { url: String(url), ...options }; return Response.json({ closed: true }); };
+  try {
+    const result = await manager.stopSharing();
+    assert.equal(request.method, 'DELETE');
+    assert.equal(request.headers.authorization, 'Bearer owner-secret');
+    assert.equal(request.url, 'https://share.uidit.app/api/rooms/room-1');
+    assert.equal(result.enabled, false);
+    assert.equal(result.inviteUrl, null);
+    assert.equal(fs.existsSync(statePath), false, 'the local owner token and invite URL are removed');
+    assert.equal(manager.pageView, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    manager.close();
+  }
+});
+
+test('shared HTML snapshots are bounded and remove sensitive query values', async () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  const manager = new CollaborationManager({ cwd, hub: { subscribe: () => () => {} } });
+  const originalFetch = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (url, options) => {
+    sent = { url: String(url), body: JSON.parse(options.body) };
+    return new Response(JSON.stringify({ pageView: { capturedAt: '2026-10-21T00:00:00.000Z', kind: 'html' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    manager.config = { relayUrl: 'https://share.uidit.app', roomId: 'room-1', ownerToken: 'owner-secret' };
+    const pageView = await manager.sharePageSnapshot({ html: '<!doctype html><html><body>Preview</body></html>', width: 1280, height: 800, url: 'http://127.0.0.1:4321/?session=private&tab=home' });
+    assert.equal(pageView.kind, 'html');
+    assert.equal(sent.url, 'https://share.uidit.app/api/rooms/room-1/page-view');
+    assert.equal(sent.body.url, 'http://127.0.0.1:4321/?tab=home');
+    assert.match(sent.body.html, /Preview/);
+    await assert.rejects(manager.sharePageSnapshot({ html: '<!doctype html>' + 'x'.repeat(2_000_000), width: 1, height: 1 }), /exceeds 2 MB/);
+  } finally { globalThis.fetch = originalFetch; manager.close(); }
+});
+
+test('collaborative reviewer deletion removes the matching local feedback without restoring it', () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  store.addComment(cwd, { id: 'cm-keep', text: 'Keep this note' });
+  store.addComment(cwd, { id: 'cm-delete', text: 'Remove this reviewer note' });
+  const session = store.readSession(cwd);
+  const merged = store.mergeCollaborativeSession(cwd, { ...session, comments: [], deletedCommentIds: ['cm-delete'] });
+  assert.deepEqual(merged.comments.map((comment) => comment.id), ['cm-keep']);
+});
+
+test('local comment deletion persists a tombstone and rejects stale collaborative snapshots', () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  store.addComment(cwd, { id: 'cm-delete', text: 'Remove this note' });
+  assert.equal(store.removeRecord(cwd, 'comments', 'cm-delete'), true);
+
+  const staleSnapshot = { ...store.readSession(cwd), comments: [{ id: 'cm-delete', text: 'Remove this note', createdAt: new Date().toISOString() }] };
+  const merged = store.mergeCollaborativeSession(cwd, staleSnapshot);
+  assert.deepEqual(merged.comments, []);
+  assert.deepEqual(merged.deletedCommentIds, ['cm-delete']);
 });
 
 test('element identity is stable per route, scoped across routes, and carries a recoverable anchor', () => {
@@ -304,6 +376,32 @@ test('html injection puts the overlay first in head and exposes the target origi
 test('html injection works without a head element', () => {
   const html = injectIntoHtml('<div>bare</div>', 'http://x');
   assert.match(html, /overlay\.js/);
+});
+
+test('new projects default to port 12321 and the control server tries its fallback port', async () => {
+  const cwd = tmpProject();
+  const config = store.init(cwd, { force: true }).config;
+  assert.equal(config.controlPort, 12321);
+  assert.equal(config.dashboardPort, 12321);
+
+  const listenOnRandomPort = async (server) => new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+  const occupied = net.createServer();
+  const primaryPort = await listenOnRandomPort(occupied);
+  const probe = net.createServer();
+  const fallbackPort = await listenOnRandomPort(probe);
+  await new Promise((resolve) => probe.close(resolve));
+  const hub = { subscribe: () => () => {}, notifyMcp() {} };
+  let running;
+  try {
+    running = await startMcpServer({ cwd, port: primaryPort, fallbackPort, previewPort: 0, hub });
+    assert.equal(running.port, fallbackPort);
+  } finally {
+    await running?.close();
+    await new Promise((resolve) => occupied.close(resolve));
+  }
 });
 
 test('concurrent writers never discard each other\'s records', async () => {

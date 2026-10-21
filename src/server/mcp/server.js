@@ -35,9 +35,9 @@ function sendJson(res, status, value) {
   res.end(body);
 }
 
-async function readJson(req) {
+async function readJson(req, maxBytes = 4 * 1024 * 1024) {
   const chunks = []; let bytes = 0;
-  for await (const chunk of req) { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) throw new Error('request body exceeds 4 MiB'); chunks.push(chunk); }
+  for await (const chunk of req) { bytes += chunk.length; if (bytes > maxBytes) throw new Error(`request body exceeds ${Math.round(maxBytes / 1024 / 1024)} MiB`); chunks.push(chunk); }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
 }
 
@@ -331,7 +331,7 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
   return { server };
 }
 
-export async function startMcpServer({ cwd = process.cwd(), port = 7718, previewPort = 7717, processManager, serviceManager, hub, collaborationManager = null }) {
+export async function startMcpServer({ cwd = process.cwd(), port = store.DEFAULT_CONTROL_PORT, fallbackPort = store.FALLBACK_CONTROL_PORT, previewPort = 7717, processManager, serviceManager, hub, collaborationManager = null }) {
   const token = tokenFor(cwd);
   const sessions = new Map();
   const unsubscribeHub = hub.subscribe?.((type) => {
@@ -403,13 +403,24 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
       if (route === '/api/collaboration' && req.method === 'GET') return sendJson(res, 200, collaborationManager?.status() ?? { enabled: false });
       if (route === '/api/collaboration/room' && req.method === 'POST') {
         if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
-        const body = await readJson(req);
-        const collaboration = await collaborationManager.createRoom({ relayUrl: body.relayUrl, adminSecret: body.adminSecret, project: path.basename(path.resolve(cwd)) });
+        const collaboration = await collaborationManager.createRoom({ project: path.basename(path.resolve(cwd)) });
         return sendJson(res, 201, { collaboration });
+      }
+      if (route === '/api/collaboration/page-view' && req.method === 'POST') {
+        await readJson(req);
+        if (!collaborationManager?.status().enabled) return sendJson(res, 409, { error: 'Create a review link before sharing the page view' });
+        const capture = await hub.requestBrowserAction({ type: 'share-page-view' }, 25000);
+        const viewport = capture.result ?? hub.browserContext?.viewport ?? {};
+        const pageView = await collaborationManager.sharePageSnapshot({ html: capture.result?.html, width: Math.round(Number(viewport.width) || 1280), height: Math.round(Number(viewport.height) || 800), url: capture.result?.url ?? hub.browserContext?.url });
+        return sendJson(res, 200, { pageView });
       }
       if (route === '/api/collaboration/revoke-invite' && req.method === 'POST') {
         if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
         return sendJson(res, 200, { collaboration: await collaborationManager.revokeInvite() });
+      }
+      if (route === '/api/collaboration/stop' && req.method === 'POST') {
+        if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
+        return sendJson(res, 200, { collaboration: await collaborationManager.stopSharing() });
       }
       if (route === '/api/flows' && req.method === 'POST') {
         const flow = flowStore.createFlow(cwd, await readJson(req)); hub.notify();
@@ -537,12 +548,20 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
           if (typeof patch.text === 'string' && (!patch.text.trim() || patch.text.length > 4000)) throw new Error('comment text must be 1–4000 characters');
           if (patch.resolved !== undefined && typeof patch.resolved !== 'boolean') throw new Error('resolved must be boolean');
         }
+        if (collection === 'comments') {
+          const pointWithin = (point, min, max) => point && Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= min && point.x <= max && point.y >= min && point.y <= max;
+          if (patch.anchor !== undefined && patch.anchor !== null && !pointWithin(patch.anchor, 0, 1)) throw new Error('comment anchor must use normalized page coordinates');
+          if (patch.markerOffset !== undefined && !pointWithin(patch.markerOffset, -1, 1)) throw new Error('comment marker offset must be normalized and within bounds');
+          if (patch.drawing !== undefined) {
+            const drawing = patch.drawing;
+            if (!drawing || !['arrow', 'rectangle', 'ellipse', 'freehand'].includes(drawing.type) || !Array.isArray(drawing.points) || drawing.points.length < 1 || drawing.points.length > 500 || drawing.points.some((point) => !pointWithin(point, 0, 1))) throw new Error('invalid normalized drawing annotation');
+          }
+        }
         if (collection === 'edits' && patch.applied === true && (!patch.provenance || typeof patch.provenance !== 'string')) throw new Error('source provenance is required to mark an edit applied');
         const record = store.updateRecord(cwd, collection, decodeURIComponent(match[2]), patch);
         if (!record) return sendJson(res, 404, { error: 'record not found' }); hub.notify(); return sendJson(res, 200, { record, session: store.readSession(cwd) });
       }
       if (match && req.method === 'DELETE') {
-        if (match[1] === 'comments') return sendJson(res, 405, { error: 'comments are history and cannot be deleted' });
         if (!store.removeRecord(cwd, match[1], decodeURIComponent(match[2]))) return sendJson(res, 404, { error: 'record not found' });
         hub.notify(); return sendJson(res, 200, { ok: true, session: store.readSession(cwd) });
       }
@@ -582,8 +601,8 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
         const body = await readJson(req); const entries = (Array.isArray(body.entries) ? body.entries : []).slice(0,30).map((item) => ({ kind: ['console','network','page','hmr'].includes(item.kind) ? item.kind : 'page', message: String(item.message ?? '').slice(0,1000).replace(/Bearer\s+[^\s]+/gi,'Bearer [redacted]').replace(/([?&](?:token|key|secret|password)=)[^&\s]*/gi,'$1[redacted]'), url: typeof item.url === 'string' ? item.url.slice(0,2000) : null, at: new Date().toISOString() })); hub.notifyBrowserDiagnostics(entries); return sendJson(res, 200, { ok: true });
       }
       if (route === '/api/browser/action-result' && req.method === 'POST') {
-        if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return sendJson(res, 403, { error: 'Live browser inspection is disabled in Settings' });
-        const body = await readJson(req); let result = body.result;
+        const body = await readJson(req, 10 * 1024 * 1024); let result = body.result;
+        if (!store.readConfig(cwd)?.ui?.allowBrowserInspection && !hub.isBrowserActionPending?.(String(body.id ?? ''), 'share-page-view')) return sendJson(res, 403, { error: 'Live browser inspection is disabled in Settings' });
         if (result?.screenshot && typeof result.screenshot === 'string') { const match = result.screenshot.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/); if (!match || match[1].length > 3_400_000) throw new Error('invalid or oversized browser screenshot'); const bytes = Buffer.from(match[1], 'base64'); if (bytes.length > 2_500_000) throw new Error('browser screenshot exceeds 2.5 MiB'); const directory = path.join(store.uiditDir(cwd), 'artifacts'); fs.mkdirSync(directory, { recursive: true, mode: 0o700 }); const filename = `browser-${crypto.randomUUID()}.jpg`; fs.writeFileSync(path.join(directory, filename), bytes, { mode: 0o600 }); result = { artifact: `.uidit/artifacts/${filename}`, mimeType: 'image/jpeg', bytes: bytes.length }; }
         hub.resolveBrowserAction(String(body.id ?? ''), { ok: body.ok === true, error: String(body.error ?? '').slice(0,500), result }); return sendJson(res, 200, { ok: true });
       }
@@ -592,16 +611,16 @@ export async function startMcpServer({ cwd = process.cwd(), port = 7718, preview
       return serveControlStatic(req, res);
     } catch (error) { return sendJson(res, 400, { error: error.message }); }
   });
-  const listen = (requestedPort) => new Promise((resolve, reject) => {
+  const listen = (requestedPort, nextPort = 0) => new Promise((resolve, reject) => {
     const failed = (error) => {
       httpServer.removeListener('listening', ready);
-      if (error.code === 'EADDRINUSE' && requestedPort !== 0) return listen(0).then(resolve, reject);
+      if (error.code === 'EADDRINUSE' && requestedPort !== 0) return listen(nextPort, 0).then(resolve, reject);
       reject(error);
     };
     const ready = () => { httpServer.removeListener('error', failed); resolve(httpServer.address().port); };
     httpServer.once('error', failed); httpServer.once('listening', ready); httpServer.listen(requestedPort, '127.0.0.1');
   });
-  actualPort = await listen(port);
+  actualPort = await listen(port, fallbackPort === port ? 0 : fallbackPort);
   const controlUrl = `http://127.0.0.1:${actualPort}`;
   return { server: httpServer, token, port: actualPort, url: `${controlUrl}/mcp`, controlUrl, clientCount: () => sessions.size,
     close: () => { unsubscribeHub?.(); for (const { transport } of sessions.values()) transport.close(); sessions.clear(); return new Promise((resolve) => httpServer.close(resolve)); } };
@@ -611,7 +630,7 @@ export function readMcpToken(cwd = process.cwd()) { return tokenFor(cwd); }
 
 export async function runStdioBridge({ cwd = process.cwd() } = {}) {
   const config = store.readConfig(cwd);
-  const url = `http://127.0.0.1:${config?.controlPort ?? 7718}/mcp`;
+  const url = `http://127.0.0.1:${config?.controlPort ?? store.DEFAULT_CONTROL_PORT}/mcp`;
   const client = new Client({ name: 'uidit-stdio-bridge', version: '0.10.3' });
   const remote = new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${readMcpToken(cwd)}` } } });
   await client.connect(remote);

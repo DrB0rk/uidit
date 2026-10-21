@@ -560,19 +560,20 @@ kbd {
 .immersive.workspace-open .preview-device-stage { right:var(--drawer-width); top:54px; inset-block-end:12px; background:var(--surface); }
 .preview-device-stage.device-tablet { --preview-width:min(768px,100%); --preview-height:1024px; }
 .preview-device-stage.device-phone { --preview-width:min(390px,100%); --preview-height:844px; }
-.preview-live-frame { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); min-height:0; overflow:hidden; outline:1px solid #dedee7; outline-offset:-1px; border-radius:16px; background:#fff; box-shadow:0 12px 36px #17182220; transition:width .2s ease,flex-basis .2s ease; }
+.preview-live-frame { position:relative; flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); min-height:0; overflow:hidden; outline:1px solid #dedee7; outline-offset:-1px; border-radius:16px; background:#fff; box-shadow:0 12px 36px #17182220; transition:width .24s ease,flex-basis .24s ease,height .24s ease; }
 .preview-live-frame.device-phone { flex:0 0 min(390px,100%); width:min(390px,100%); height:844px; }
 .preview-live-frame.device-tablet { flex:0 0 min(768px,100%); width:min(768px,100%); height:1024px; }
-/* Desktop is not a fixed device box: the frame fills the review area beside the
-   drawer so the app renders at the window's real CSS width, like the desktop
-   browser it stands in for. Tablet, phone and custom keep exact device sizes. */
-.preview-live-frame.device-desktop { flex:1 1 auto; width:100%; height:100%; }
+/* Desktop fills the stage while keeping the same explicit flex-basis model as
+   tablet and phone, so transitions between full width and a device width can
+   interpolate instead of snapping from `auto`. */
+.preview-live-frame.device-desktop { flex:0 0 var(--preview-width); width:var(--preview-width); height:var(--preview-height); }
 .preview-device-stage.device-custom .preview-live-frame { flex:0 0 min(var(--custom-width),100%); width:min(var(--custom-width),100%); height:var(--custom-height); }
 .custom-viewport { display:flex; align-items:center; gap:4px; padding-left:6px; color:var(--muted); font-size:11px; }
 .custom-viewport input { width:54px; height:27px; padding:2px 4px; border:1px solid var(--border); border-radius:5px; color:var(--fg); background:var(--canvas); }
 .component-state-actions { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
 /* The preview and drawer share one divider; the frame edge makes the live page read as a distinct, rounded surface. */
 .immersive.workspace-open .preview-live-frame { border:1px solid var(--border); border-right:0; border-radius:16px; outline:0; outline-color:var(--surface); background:var(--surface); box-shadow:0 10px 28px #17182215; }
+@media (prefers-reduced-motion: reduce) { .preview-live-frame { transition:none; } }
 .immersive-preview { position:absolute; inset:0; display:block; width:100%; height:100%; border:0; background:#f4f3ed; }
 .immersive.workspace-open .immersive-preview { border-radius:15px; }
 .preview-reference-overlay { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:var(--reference-opacity,.5); pointer-events:none; }
@@ -619,21 +620,26 @@ kbd {
 .workspace-drawer .bar .field > label { display: none; }
 .status-dot { width: 7px; height: 7px; background: var(--danger-text); border-radius: 50%; flex: none; }
 .status-dot.online { background: var(--ok-text); }
-.workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; flex: none; padding: 9px 13px 11px; border-bottom: 1px solid var(--border); }
-.workspace-tabs button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; min-height: 35px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; color: var(--fg-muted); background: transparent; font-size: 11px; font-weight: 560; text-align: left; white-space: nowrap; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+.workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; flex: none; padding: 6px 11px 8px; border-bottom: 1px solid var(--border); }
+.workspace-tabs button { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 32px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; color: var(--fg-muted); background: transparent; font-size: 11px; font-weight: 560; text-align: left; white-space: nowrap; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
 /* Narrowed below the default width, the sections stay icon-only so their labels
    never truncate into ambiguity; aria-label and title carry the name. */
-.workspace-drawer.compact .workspace-tabs button { justify-content: center; gap: 5px; padding: 0 4px; }
+.workspace-drawer.compact .workspace-tabs button { gap: 5px; padding: 0 4px; }
 .workspace-drawer.compact .workspace-tabs .tab-label { display: none; }
 .workspace-tabs button:hover { color: var(--fg); background: var(--raised); }
 .workspace-tabs button.active { color: var(--fg); background: var(--raised); border-color: var(--border); box-shadow: 0 1px 2px #1718220a; }
 .workspace-tabs button > span:not(.tab-count) { overflow: hidden; text-overflow: ellipsis; }
 .workspace-tabs button.active svg { color: var(--accent-text); }
 .tab-count { padding: 1px 5px; border-radius: 12px; background: var(--accent-wash); color: var(--accent-text); font-size: 9px; }
+.workspace-subnav { display: flex; gap: 4px; flex: none; padding: 5px 12px; border-bottom: 1px solid var(--border); }
+.workspace-subnav button { flex: 1; min-width: 0; min-height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; color: var(--fg-muted); background: transparent; font: 550 11px var(--font); cursor: pointer; }
+.workspace-subnav button:hover { color: var(--fg); background: var(--raised); }
+.workspace-subnav button.active { color: var(--fg); background: var(--raised); border-color: var(--border); }
 .workspace-content { min-height: 0; flex: 1; overflow: auto; }
 .workspace-panel-loading { display:grid; min-height:180px; place-items:center; color:var(--fg-muted); font-size:12px; }
 .workspace-content > .side { height: 100%; min-height: 0; border: 0; }
-.workspace-content .tabs { display: none; }
+.workspace-content .side > .tabs { padding-inline: 12px; }
+.workspace-content .side > .tabs .tab { padding: 8px 5px; font-size: 11px; }
 .workspace-content .panel { padding: 14px; }
 .panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 1px 11px; }
 .panel-heading h2 { margin: 0; font-size: 14px; line-height: 1.3; font-weight: 680; letter-spacing: -.015em; }
@@ -712,6 +718,7 @@ kbd {
 .share-review-top > div { display:grid; gap:2px; flex:1; min-width:0; }
 .share-review-top strong { font-size:12px; }
 .share-review-top small,.share-review-link span,.share-review-form small { color:var(--fg-muted); font-size:10px; line-height:1.45; }
+.share-review-help { margin:8px 0 0 39px; color:var(--fg-muted); font-size:10px; line-height:1.45; }
 .share-review-icon { display:grid; place-items:center; width:30px; height:30px; flex:none; border-radius:9px; color:var(--accent); background:color-mix(in srgb,var(--accent) 10%,transparent); }
 .share-review-link { display:grid; gap:4px; margin:9px 0 0 39px; }
 .share-review-link input,.share-review-form input { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--border); border-radius:7px; padding:7px 8px; color:var(--fg); background:var(--surface); font:11px var(--font-mono,monospace); }
@@ -723,6 +730,8 @@ kbd {
 .share-review-activity summary { cursor:pointer; font-weight:650; }
 .share-review-activity ul { display:grid; gap:5px; margin:7px 0 0; padding-left:16px; }
 .share-review-activity time { opacity:.7; }
+.share-review-actions { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:5px; }
+.share-review-actions > span { color:var(--fg-muted); font-size:10px; }
 .share-review-form small { margin-top:-3px; }
 .design-panel { max-width:680px; margin:0 auto; }
 .design-panel-heading,.design-tools-heading,.reference-card > div,.reference-opacity { display:flex; align-items:center; justify-content:space-between; gap:10px; }

@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.3">Latest release: v0.10.3</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.4">Latest release: v0.10.4</a> · Node.js 22+</p>
 
 ---
 
@@ -32,7 +32,7 @@ exiting. From a clone instead: `npm install -g .`
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.3/drb0rk-uidit-0.10.3.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.4/drb0rk-uidit-0.10.4.tgz
 ```
 
 ## Use
@@ -161,13 +161,14 @@ saved as an explicit `before → after` record.
 
 **Team review** — create an invite-only review room from the Feedback sidebar. A
 Cloudflare Worker Durable Object keeps the room state and relays live comments,
-replies, participant presence, and activity to the local UIDIT session. The
-sharing form requires explicit acknowledgement that the preview and review data
-will be externally accessible. Invite links expire after seven days; rotating a
-link revokes the old link and disconnects current reviewers. Remote reviewers can
-comment and reply, but cannot change workflow status or assignments, call local
-MCP tools, or enumerate local services. The owner token stays in
-`.uidit/runtime/`; the Worker admin secret is used only to create a room.
+replies, participant presence, and activity to the local UIDIT session. UIDIT
+creates the share link directly through its hosted relay at `share.uidit.app`; no
+relay secret is needed. The owner can share a masked page snapshot with the room;
+reviewers can pin feedback to it, reply in threads, and delete their own comments.
+They cannot access the live local preview, change workflow status or assignments,
+call local MCP tools, or enumerate local services. The owner token stays in
+`.uidit/runtime/`. Invite links expire after seven days; rotating a link
+invalidates it and disconnects current reviewers.
 
 **Interaction flows** — record clicks, form actions, and navigation from the
 Flows panel, then replay them against the connected preview. Each step can keep a
@@ -236,23 +237,22 @@ project root.
 
 ### Cloudflare relay setup
 
-The relay is a standalone Worker under `cloudflare/relay/`. It uses a SQLite
-Durable Object for room state and hibernating WebSockets for low-overhead live
-updates. Deploy it with Wrangler from the repository:
+The relay is a standalone Worker under `cloudflare/relay/`, deployed to the
+`share.uidit.app` custom domain. It uses a SQLite Durable Object for room state
+and hibernating WebSockets for live updates. Room links are created directly
+from **Feedback → Team review** without a relay secret. Create requests are
+rate-limited, and rooms are deleted when their seven-day invite expires. Deploy
+it with Wrangler from the repository:
 
 ```sh
 npm install
 npm run relay:deploy
-npx wrangler secret put ADMIN_SECRET --config cloudflare/relay/wrangler.toml
 ```
 
-Set `ADMIN_SECRET` to a long random value (at least 24 characters), then paste
-the Worker origin and secret into **Feedback → Team review**. For local relay
-development, run `npm run relay:dev -- --var ADMIN_SECRET:replace-with-a-long-random-value`.
-The relay stores comments, room membership, and a bounded activity log in
-Cloudflare. Invite links are bearer credentials: share them only with the
-intended review group; they expire after seven days and can be rotated from the
-Feedback panel.
+For local relay development, run `npm run relay:dev`. The relay stores review
+comments, room membership, and a bounded activity log in Cloudflare. Invite
+links are bearer credentials: share them only with the intended review group;
+they expire after seven days and can be rotated from the Feedback panel.
 
 ## Any dev server
 
@@ -302,7 +302,7 @@ uidit mcp stdio           # stdio bridge for MCP clients; UIDIT must be running
 ```
 
 UIDIT exposes an authenticated, loopback-only Streamable HTTP MCP endpoint at
-`http://127.0.0.1:7718/mcp` by default. Run `uidit mcp info` to obtain the project
+`http://127.0.0.1:12321/mcp` by default (falling back to port `32123` when occupied). Run `uidit mcp info` to obtain the project
 token and connection details. The token is stored under `.uidit/runtime/` with
 owner-only permissions; `.uidit/` is ignored by `uidit init`. MCP connections are
 enabled by default, while agent writes and dev process control are disabled until
@@ -363,7 +363,7 @@ plugin's copy, and both point at the same local server.
 | Command | Does |
 | --- | --- |
 | `uidit init` | create `.uidit/` in the current project |
-| `uidit start [--port N]` | run the review UI and preview proxy (control port defaults to 7718) |
+| `uidit start [--port N]` | run the review UI and preview proxy (control port defaults to 12321, falling back to 32123 when occupied) |
 | `uidit -- <command...>` | launch an explicit project dev command |
 | `uidit --attach <url>` | attach to a local server without stopping it |
 | `uidit --no-start` | legacy manual discovery workflow |
@@ -387,7 +387,7 @@ your dev server :3000
         │
         │  preview proxy :7717, injects unprivileged overlay.js
         ▼
-your browser ───── isolated control UI + REST/SSE + MCP :7718
+your browser ───── isolated control UI + REST/SSE + MCP :12321 (fallback :32123)
                          │
                          └── .uidit/session.json  ◄── your agent
 ```

@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 import { anchorFor, routeIdentity } from './identity.js';
 
 export const UIDIT_DIR = '.uidit';
+export const DEFAULT_CONTROL_PORT = 12321;
+export const FALLBACK_CONTROL_PORT = 32123;
 
 export function projectRoot(cwd = process.cwd()) {
   return path.resolve(cwd);
@@ -93,7 +95,7 @@ export function readConfig(cwd = process.cwd()) {
 }
 
 function defaultConfig() {
-  return { version: 2, dashboardPort: 7718, controlPort: 7718, previewPort: 7717, targetUrl: null,
+  return { version: 2, dashboardPort: DEFAULT_CONTROL_PORT, controlPort: DEFAULT_CONTROL_PORT, previewPort: 7717, targetUrl: null,
     services: [],
     dev: { command: null, cwd: '.', url: null, autoStart: true, restartOnCrash: false },
     ui: { position: 'bottom-left', defaultOpen: false, inspectionDefault: false, allowBrowserInspection: false, frameAncestors: [] },
@@ -334,6 +336,9 @@ export function removeRecord(cwd, collection, id) {
   const before = session[collection].length;
   session[collection] = session[collection].filter((r) => r.id !== id);
   if (session[collection].length === before) return false;
+  if (collection === 'comments') {
+    session.deletedCommentIds = [...new Set([...(Array.isArray(session.deletedCommentIds) ? session.deletedCommentIds : []), id])];
+  }
   writeSession(cwd, session);
   return true;
 }
@@ -342,15 +347,23 @@ export function mergeCollaborativeSession(cwd, remoteSession) {
   if (!remoteSession || !Array.isArray(remoteSession.comments)) throw new Error('invalid collaborative session snapshot');
   const session = readSession(cwd);
   const merged = new Map(session.comments.map((comment) => [comment.id, comment]));
+  const deletedCommentIds = new Set([
+    ...(Array.isArray(session.deletedCommentIds) ? session.deletedCommentIds : []),
+    ...(Array.isArray(remoteSession.deletedCommentIds) ? remoteSession.deletedCommentIds : []),
+  ].filter((id) => typeof id === 'string'));
+  for (const id of deletedCommentIds) merged.delete(id);
   for (const remote of remoteSession.comments) {
+    if (deletedCommentIds.has(remote?.id)) continue;
     if (!remote || typeof remote.id !== 'string' || typeof remote.text !== 'string') continue;
     const local = merged.get(remote.id);
     const stamp = (value) => Date.parse(value?.updatedAt ?? value?.replies?.at(-1)?.createdAt ?? value?.createdAt ?? '') || 0;
     if (!local || stamp(remote) >= stamp(local)) merged.set(remote.id, remote);
   }
   const comments = [...merged.values()];
-  if (JSON.stringify(comments) === JSON.stringify(session.comments)) return session;
+  if (JSON.stringify(comments) === JSON.stringify(session.comments)
+    && JSON.stringify([...deletedCommentIds]) === JSON.stringify(session.deletedCommentIds ?? [])) return session;
   session.comments = comments;
+  session.deletedCommentIds = [...deletedCommentIds];
   return writeSession(cwd, session);
 }
 

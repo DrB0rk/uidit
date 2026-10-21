@@ -60,7 +60,7 @@ const commands = {
 
   async start(cwd, argv) {
     const initialConfig = store.readConfig(cwd);
-    let port = Number(initialConfig?.controlPort ?? initialConfig?.dashboardPort ?? 7718);
+    let port = Number(initialConfig?.controlPort ?? initialConfig?.dashboardPort ?? store.DEFAULT_CONTROL_PORT);
     const configuredPreviewPort = Number(initialConfig?.previewPort ?? 7717);
     const separator = argv.indexOf('--');
     const optionArgs = separator < 0 ? argv : argv.slice(0, separator);
@@ -85,7 +85,7 @@ const commands = {
     const verifier = createSelectiveVerifier({ cwd, hub, onError: (error) => hub?.notifyDev({ hmrVerification: { state: 'unsupported', reason: error.message } }) });
     const preview = await startServer({ cwd, port: configuredPreviewPort, controlPort: port, previewOnly: true, hub, collaborationManager });
     let mcp;
-    try { mcp = await startMcpServer({ cwd, port, previewPort: preview.port, processManager, serviceManager, hub, collaborationManager }); }
+    try { mcp = await startMcpServer({ cwd, port, fallbackPort: store.FALLBACK_CONTROL_PORT, previewPort: preview.port, processManager, serviceManager, hub, collaborationManager }); }
     catch (err) { collaborationManager.close(); hub.close(); preview.server.close(); throw err; }
     verifier.start();
     let stopping = false;
@@ -155,7 +155,7 @@ const commands = {
     const sub = argv[0] ?? 'info';
     if (sub === 'info') {
       const config = store.readConfig(cwd);
-      const port = config?.controlPort ?? 7718;
+      const port = config?.controlPort ?? store.DEFAULT_CONTROL_PORT;
       console.log(JSON.stringify({ url: `http://127.0.0.1:${port}/mcp`, transport: 'Streamable HTTP', token: readMcpToken(cwd), stdio: 'uidit mcp stdio (requires a running uidit instance)' }, null, 2));
       return;
     }
@@ -163,7 +163,7 @@ const commands = {
       try {
         return await runStdioBridge({ cwd });
       } catch (error) {
-        const port = store.readConfig(cwd)?.controlPort ?? 7718;
+        const port = store.readConfig(cwd)?.controlPort ?? store.DEFAULT_CONTROL_PORT;
         console.error(`${c.bold('uidit mcp stdio')} could not reach http://127.0.0.1:${port}/mcp${error?.message ? ` (${error.message})` : ''}`);
         console.error(`  ${c.dim('Start `uidit` in this project, then let your MCP client reconnect.')}`);
         process.exitCode = 1;

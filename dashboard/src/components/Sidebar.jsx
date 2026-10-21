@@ -6,7 +6,6 @@ import { triageFeedback } from '../../../src/server/triage.js';
 import { readImageFiles } from '../lib/image-files.js';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
-const DEFAULT_RELAY = 'https://uidit-collaboration-relay.berk-04d.workers.dev';
 
 function PhotoAttachments({ attachments, onChange, onStatus }) {
   const [busy, setBusy] = useState(false);
@@ -38,17 +37,10 @@ async function pasteCommentImages(event, attachments, setAttachments, onStatus) 
 }
 
 function ShareReview({ collaboration, actions, onStatus, busy, setBusy }) {
-  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
-  const [adminSecret, setAdminSecret] = useState('');
-  const [showSetup, setShowSetup] = useState(false);
-  const [externalAck, setExternalAck] = useState(false);
-  const create = async (event) => {
-    event.preventDefault();
+  const create = async () => {
     try {
       setBusy(true);
-      await actions.createCollaborationRoom({ relayUrl, adminSecret });
-      setAdminSecret('');
-      setShowSetup(false);
+      await actions.createCollaborationRoom({});
       onStatus('Share link created', 'ok');
     } catch (error) { onStatus(error.message, 'error'); }
     finally { setBusy(false); }
@@ -63,13 +55,24 @@ function ShareReview({ collaboration, actions, onStatus, busy, setBusy }) {
     catch (error) { onStatus(error.message, 'error'); }
     finally { setBusy(false); }
   };
+  const stopSharing = async () => {
+    if (!window.confirm('Stop sharing this review completely? Everyone will be disconnected, the link will stop working, and the shared page snapshot will be deleted.')) return;
+    try { setBusy(true); await actions.stopCollaborationSharing(); onStatus('Review sharing stopped; the link is permanently invalid', 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const sharePageView = async () => {
+    try { setBusy(true); await actions.createCollaborationPageView(); onStatus('HTML snapshot shared with reviewers', 'ok'); }
+    catch (error) { onStatus(error.message, 'error'); }
+    finally { setBusy(false); }
+  };
   return <section className="share-review" aria-label="Share team review">
     <div className="share-review-top"><span className="share-review-icon"><Users size={15} aria-hidden="true" /></span><div><strong>Team review</strong><small>{collaboration?.enabled ? `${collaboration.participants?.length ?? 0} online · ${collaboration.connected ? 'Live' : 'Reconnecting'}` : 'Invite someone to review this page'}</small></div>
-      {collaboration?.inviteUrl ? <button type="button" className="btn primary sm" onClick={copy}><Copy size={13} />Copy link</button> : <button type="button" className="btn sm" onClick={() => setShowSetup((value) => !value)}><Link2 size={13} />{showSetup ? 'Close' : 'Create link'}</button>}
+      {collaboration?.inviteUrl ? <button type="button" className="btn primary sm" onClick={copy}><Copy size={13} />Copy link</button> : <button type="button" className="btn sm" onClick={create} disabled={busy}><Link2 size={13} />{busy ? 'Creating…' : 'Create link'}</button>}
     </div>
-    {collaboration?.inviteUrl && <div className="share-review-link"><input aria-label="Team review share link" readOnly value={collaboration.inviteUrl} onFocus={(event) => event.target.select()} /><span>{collaboration.error || collaboration.project} · reviewer access: comment only · expires {collaboration.inviteExpiresAt ? new Date(collaboration.inviteExpiresAt).toLocaleDateString() : 'unknown'}</span><button type="button" className="btn sm danger" disabled={busy} onClick={revoke}>Revoke and rotate link</button></div>}
+    {!collaboration?.inviteUrl && <p className="share-review-help">Create a comment-only link on uidit.app. Anyone with the link can join for 7 days.</p>}
+    {collaboration?.inviteUrl && <div className="share-review-link"><input aria-label="Team review share link" readOnly value={collaboration.inviteUrl} onFocus={(event) => event.target.select()} /><span>{collaboration.error || collaboration.project} · share a static HTML snapshot for reviewers; scripts and controls are disabled · no tunnel or local server access needed · expires {collaboration.inviteExpiresAt ? new Date(collaboration.inviteExpiresAt).toLocaleDateString() : 'unknown'}</span><div className="share-review-actions"><button type="button" className="btn sm" disabled={busy} onClick={sharePageView}><MousePointerClick size={13}/>{busy ? 'Capturing…' : collaboration.pageView?.capturedAt ? 'Refresh HTML snapshot' : 'Share HTML snapshot'}</button>{collaboration.pageView?.capturedAt && <span>Updated {fmt(collaboration.pageView.capturedAt)}</span>}<button type="button" className="btn sm danger" disabled={busy} onClick={revoke}>Revoke and rotate link</button><button type="button" className="btn sm danger" disabled={busy} onClick={stopSharing}>Stop sharing</button></div></div>}
     {collaboration?.activity?.length > 0 && <details className="share-review-activity"><summary>Recent review activity</summary><ul>{collaboration.activity.slice(0, 5).map((item) => <li key={item.id ?? `${item.type}-${item.at}`}><strong>{item.name}</strong> {item.type.replaceAll('-', ' ')} · <time>{new Date(item.at).toLocaleTimeString()}</time></li>)}</ul></details>}
-    {showSetup && !collaboration?.inviteUrl && <form className="share-review-form" onSubmit={create}><label>Cloudflare relay URL<input type="url" value={relayUrl} onChange={(event) => setRelayUrl(event.target.value)} required /></label><label>Relay admin secret<input type="password" value={adminSecret} onChange={(event) => setAdminSecret(event.target.value)} minLength={24} autoComplete="off" placeholder="Paste ADMIN_SECRET" required /></label><small>UIDIT sends the secret over HTTPS to create this room. It is not saved. Remote reviewers can add comments and replies but cannot access local tools.</small><label className="share-exposure-ack"><input type="checkbox" checked={externalAck} onChange={(event) => setExternalAck(event.target.checked)} required /><span>I understand this exposes the current preview and its review data to anyone with the link for 7 days.</span></label><button type="submit" className="btn primary" disabled={busy || !externalAck}>{busy ? 'Creating…' : 'Create share link'}</button></form>}
   </section>;
 }
 
@@ -82,15 +85,24 @@ function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
   const [attrName, setAttrName] = useState('');
   const [attrVal, setAttrVal] = useState('');
   const id = useId();
+  const submitComment = () => {
+    if (busy || (!text.trim() && !attachments.length)) return;
+    return onComment(text.trim() || 'See attached reference photo.', attachments).then(() => { setText(''); setAttachments([]); });
+  };
+  const onCommentKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || (!text.trim() && !attachments.length)) return;
+    event.preventDefault();
+    submitComment();
+  };
 
   if (!selected) {
     return (
       <section className="selection selection-empty" aria-label="Add page feedback">
         <div className="selection-intro"><strong>Leave page feedback</strong><span>Select an element to attach a note, or add a general page note.</span></div>
         <label className="sr-only" htmlFor={`${id}-comment`}>Add a note about this page</label>
-        <textarea id={`${id}-comment`} data-testid="comment" className="comment" rows={2} value={text} placeholder="What should change on this page?" onChange={(e) => setText(e.target.value)} onPaste={(event) => pasteCommentImages(event, attachments, setAttachments, onStatus)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && (text.trim() || attachments.length)) { e.preventDefault(); onComment(text.trim() || 'See attached reference photo.', attachments).then(() => { setText(''); setAttachments([]); }); } }} />
+        <textarea id={`${id}-comment`} data-testid="comment" className="comment" rows={2} value={text} placeholder="What should change on this page?" onChange={(e) => setText(e.target.value)} onPaste={(event) => pasteCommentImages(event, attachments, setAttachments, onStatus)} onKeyDown={onCommentKeyDown} />
         <PhotoAttachments attachments={attachments} onChange={setAttachments} onStatus={onStatus} />
-        <div className="row selection-actions"><span className="muted hint">Page-level note</span><button type="button" className="btn primary sm" disabled={(!text.trim() && !attachments.length) || busy} onClick={async () => { await onComment(text.trim() || 'See attached reference photo.', attachments); setText(''); setAttachments([]); }}>Add note</button></div>
+        <div className="row selection-actions"><span className="muted hint">Page-level note · Enter to send · Shift+Enter for a new line</span><button type="button" className="btn primary sm" disabled={(!text.trim() && !attachments.length) || busy} onClick={submitComment}>Add note</button></div>
       </section>
     );
   }
@@ -122,12 +134,7 @@ function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
         placeholder="What should change here?"
         onChange={(e) => setText(e.target.value)}
         onPaste={(event) => pasteCommentImages(event, attachments, setAttachments, onStatus)}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && (text.trim() || attachments.length)) {
-            e.preventDefault();
-            onComment(text.trim() || 'See attached reference photo.', attachments).then(() => { setText(''); setAttachments([]); });
-          }
-        }}
+        onKeyDown={onCommentKeyDown}
       />
       <PhotoAttachments attachments={attachments} onChange={setAttachments} onStatus={onStatus} />
       <div className="row">
@@ -136,15 +143,11 @@ function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
           id="comment-send"
           className="btn primary sm"
           disabled={(!text.trim() && !attachments.length) || busy}
-          onClick={async () => {
-            await onComment(text.trim() || 'See attached reference photo.', attachments);
-            setText('');
-            setAttachments([]);
-          }}
+          onClick={submitComment}
         >
           Comment
         </button>
-        <span className="muted hint">{selected.tag} · {selected.page?.replace(/^https?:\/\//, '')}</span>
+        <span className="muted hint">{selected.tag} · Enter to send · Shift+Enter for a new line</span>
       </div>
 
       <details className="tools">
@@ -265,7 +268,7 @@ function SelectionBox({ selected, onComment, onOverlay, busy, onStatus }) {
   );
 }
 
-function CommentItem({ comment, element, anchorStatus, hasTask, onCreateTask, onReattach, onToggle, onUpdate, onReply, onSelect, onCodeRef, onStatus, onAssign, collaborators = [] }) {
+function CommentItem({ comment, element, anchorStatus, hasTask, onCreateTask, onReattach, onToggle, onDelete, onUpdate, onReply, onSelect, onCodeRef, onStatus, onAssign, collaborators = [] }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(comment.text);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -288,6 +291,9 @@ function CommentItem({ comment, element, anchorStatus, hasTask, onCreateTask, on
           <button type="button" className="btn sm ghost" onClick={() => onToggle(comment)}>
             {comment.resolved ? <RotateCcw size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
             <span className="sr-only">{comment.resolved ? 'Reopen comment' : 'Resolve comment'}</span>
+          </button>
+          <button type="button" className="btn sm ghost danger" aria-label="Delete note" title="Delete note" onClick={() => onDelete(comment)}>
+            <Trash2 size={14} aria-hidden="true" />
           </button>
         </span>
       </div>
@@ -474,6 +480,7 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
     return actions.patch('edits', e.id, { applied: true, appliedAt: new Date().toISOString(), provenance: provenance.trim() });
   });
   const drop = run((collection, id) => actions.remove(collection, id), 'Removed');
+  const deleteComment = run((c) => actions.remove('comments', c.id), 'Note deleted');
   const updateComment = run((comment, text) => actions.patch('comments', comment.id, { text }), 'Note updated');
   const replyComment = run((comment, text) => actions.reply(comment.id, { text, author: 'reviewer' }), 'Reply added');
   const addCodeReference = run((comment, reference) => actions.patch('comments', comment.id, { codeRefs: [...(comment.codeRefs ?? []), reference] }), 'Code reference added');
@@ -546,6 +553,7 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
                 onCreateTask={createTask}
                 onReattach={reattachComment}
                 onToggle={toggleComment}
+                onDelete={deleteComment}
                 onUpdate={updateComment}
                 onReply={replyComment}
                 onSelect={onSelect}

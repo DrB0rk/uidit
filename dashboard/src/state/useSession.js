@@ -92,7 +92,7 @@ export function useSession() {
       return req(`/api${route}`, method, body);
     },
     patch: (collection, id, patchBody) => req(`/api/${collection}/${encodeURIComponent(id)}`, 'PATCH', patchBody),
-    remove: (collection, id) => req(`/api/${collection}/${encodeURIComponent(id)}`, 'DELETE'),
+    remove: (collection, id) => withSession(req(`/api/${collection}/${encodeURIComponent(id)}`, 'DELETE')),
     discover: () => req('/api/discover').then((d) => d.targets),
     dev: () => req('/api/dev'),
     devAction: (action) => {
@@ -109,8 +109,10 @@ export function useSession() {
     },
     mcp: () => req('/api/mcp'),
     selectElement: (selection) => req('/api/selection', 'POST', selection),
-    createCollaborationRoom: (body) => req('/api/collaboration/room', 'POST', body),
-    revokeCollaborationInvite: () => req('/api/collaboration/revoke-invite', 'POST', {}),
+    createCollaborationRoom: (body) => req('/api/collaboration/room', 'POST', body).then((data) => { setCollaboration(data.collaboration); return data.collaboration; }),
+    createCollaborationPageView: () => req('/api/collaboration/page-view', 'POST', {}).then((data) => { setCollaboration((current) => ({ ...current, pageView: data.pageView })); return data.pageView; }),
+    revokeCollaborationInvite: () => req('/api/collaboration/revoke-invite', 'POST', {}).then((data) => { setCollaboration(data.collaboration); return data.collaboration; }),
+    stopCollaborationSharing: () => req('/api/collaboration/stop', 'POST', {}).then((data) => { setCollaboration(data.collaboration); return data.collaboration; }),
     createFlow: (name) => withSession(req('/api/flows', 'POST', { name })),
     addFlowStep: (flowId, step) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/steps`, 'POST', step)),
     addFlowLog: (flowId, log) => withSession(req(`/api/flows/${encodeURIComponent(flowId)}/logs`, 'POST', log)),

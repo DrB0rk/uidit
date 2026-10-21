@@ -5,7 +5,7 @@
  * read the user's UI feedback without a running dashboard. The live MCP server (see
  * mcp.json) adds the interactive tools once `uidit` is running in the project.
  */
-import { isInitialized, readConfig, readSession } from '../src/server/store.js';
+import { DEFAULT_CONTROL_PORT, isInitialized, readConfig, readSession } from '../src/server/store.js';
 
 const MAX_TEXT = 600;
 
@@ -28,7 +28,7 @@ function readWork(cwd) {
   return {
     revision: session.revision,
     updatedAt: session.updatedAt,
-    controlPort: config.controlPort ?? config.dashboardPort ?? 7718,
+    controlPort: config.controlPort ?? config.dashboardPort ?? DEFAULT_CONTROL_PORT,
     comments: session.comments.map((comment) => ({
       id: comment.id,
       status: comment.status ?? (comment.resolved ? 'resolved' : 'open'),

@@ -1,6 +1,13 @@
 name = "uidit-collaboration-relay"
 main = "src/index.js"
+account_id = "804d40b7c3a3aafad4ff0214dcb56ad6"
 compatibility_date = "2026-10-11"
+workers_dev = true
+preview_urls = false
+
+[[routes]]
+pattern = "share.uidit.app"
+custom_domain = true
 
 [[rules]]
 type = "Text"
@@ -14,3 +21,11 @@ class_name = "CollaborationRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["CollaborationRoom"]
+
+[[ratelimits]]
+name = "ROOM_CREATE_LIMIT"
+namespace_id = "938472615"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60

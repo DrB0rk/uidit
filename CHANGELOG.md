@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.4 — 2026-10-21
+
+- Team review links now share a self-contained, sanitized HTML snapshot instead of exposing a live preview through a tunnel. Reviewers can inspect elements, pin feedback, reply, and delete their own comments; owners can stop sharing completely.
+- Fixed collaboration comment deletion so removed feedback stays removed, and added editing/deleting comments from the local dashboard context menu.
+- Improved comment and drawing placement, dragging, undo, and Escape handling across the dashboard and preview.
+- Grouped workspace sections into Review, Design, Runtime, and Project; updated the default control port to 12321 with fallback 32123.
+- Updated the UIDIT agent skill and made release installation use the public GitHub tarball/source only.
+
 ## 0.10.3 — 2026-10-21
 
 - Removed GitHub Packages publishing and authentication paths. Installs now come directly from GitHub release assets, with a GitHub source archive fallback.

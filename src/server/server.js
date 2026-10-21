@@ -77,7 +77,7 @@ function bridgeOrigins(cwd) {
     .join(' ');
 }
 
-export function injectIntoHtml(html, targetOrigin = '', controlOrigin = 'http://127.0.0.1:7718', bridgeOrigins = '') {
+export function injectIntoHtml(html, targetOrigin = '', controlOrigin = `http://127.0.0.1:${store.DEFAULT_CONTROL_PORT}`, bridgeOrigins = '') {
   const attr = (value) => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
   // data-bridge tells the overlay which further origins may host it, so a review
   // workspace served from another local port can still receive its messages.
@@ -241,7 +241,7 @@ async function proxyRequest(req, res, target, controlOrigin, cwd = process.cwd()
   req.pipe(upstream);
 }
 
-export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = 7718, previewOnly = false, collaborationManager = null } = {}) {
+export function createServer({ cwd = process.cwd(), hub = createHub(), port = 7717, controlPort = store.DEFAULT_CONTROL_PORT, previewOnly = false, collaborationManager = null } = {}) {
   const controlOrigin = () => `http://127.0.0.1:${store.readConfig(cwd)?.controlPort ?? controlPort}`;
   const server = http.createServer(async (req, res) => {
     // A browser aborting a request (navigation, closed tab) must not take down the
@@ -310,9 +310,12 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         if (route === '/api/collaboration' && req.method === 'GET') return json(res, 200, collaborationManager?.status() ?? { enabled: false });
         if (route === '/api/collaboration/room' && req.method === 'POST') {
           if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
-          const body = await readBody(req);
-          const collaboration = await collaborationManager.createRoom({ relayUrl: body.relayUrl, adminSecret: body.adminSecret, project: path.basename(path.resolve(cwd)) });
+          const collaboration = await collaborationManager.createRoom({ project: path.basename(path.resolve(cwd)) });
           return json(res, 201, { collaboration });
+        }
+        if (route === '/api/collaboration/stop' && req.method === 'POST') {
+          if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
+          return json(res, 200, { collaboration: await collaborationManager.stopSharing() });
         }
         if (route === '/api/flows' && req.method === 'POST') {
           const flow = flowStore.createFlow(cwd, await readBody(req)); hub.notify(); return json(res, 201, { flow, session: store.readSession(cwd) });
@@ -468,7 +471,7 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
   return server;
 }
 
-export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? 7718, previewOnly = false, hub: suppliedHub, collaborationManager = null } = {}) {
+export function startServer({ cwd = process.cwd(), port = 7717, controlPort = store.readConfig(cwd)?.controlPort ?? store.DEFAULT_CONTROL_PORT, previewOnly = false, hub: suppliedHub, collaborationManager = null } = {}) {
   const hub = suppliedHub ?? createHub({ cwd });
   hub.watch();
   const server = createServer({ cwd, hub, port, controlPort, previewOnly, collaborationManager });

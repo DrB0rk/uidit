@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Toolbar from './Toolbar.jsx';
 import { useSession } from '../state/useSession.js';
-import { MessageSquareText, Layers3, PencilRuler, Server, Bot, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles } from 'lucide-react';
+import { MessageSquareText, Settings2, Sun, Moon, Workflow, Laptop, Tablet, Smartphone, WandSparkles } from 'lucide-react';
 
 const Sidebar = lazy(() => import('./Sidebar.jsx'));
 const DesignPanel = lazy(() => import('./DesignPanel.jsx').then((module) => ({ default: module.DesignPanel })));
@@ -10,14 +10,24 @@ const ServerPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({
 const AgentsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.AgentsPanel })));
 const SettingsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.SettingsPanel })));
 
-const TABS = [['feedback', 'Feedback', MessageSquareText], ['design', 'Design', WandSparkles], ['inspect', 'Elements', Layers3], ['changes', 'Changes', PencilRuler], ['flows', 'Flows', Workflow], ['server', 'Server', Server], ['agents', 'Agents', Bot], ['settings', 'Settings', Settings2]];
-const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/edit']);
+const TABS = [['review', 'Review', MessageSquareText], ['design', 'Design', WandSparkles], ['runtime', 'Runtime', Workflow], ['project', 'Project', Settings2]];
+const REVIEW_TABS = ['feedback', 'inspect', 'changes'];
+const RUNTIME_TABS = [['flows', 'Flows'], ['server', 'Server']];
+const PROJECT_TABS = [['agents', 'Agents'], ['settings', 'Settings']];
+const TAB_GROUP = { review: 'review', feedback: 'review', inspect: 'review', changes: 'review', design: 'design', runtime: 'runtime', flows: 'runtime', server: 'runtime', project: 'project', agents: 'project', settings: 'project' };
+const PREVIEW_API = new Set(['/element', '/comment', '/comment-reply', '/comment-update', '/comment-delete', '/edit']);
 // The review panel resizes by dragging its edge; the preview keeps the rest of the width.
 const DRAWER_KEY = 'uidit-drawer-width';
 const DRAWER_MIN = 320;
 const DRAWER_MAX = 760;
 const DRAWER_DEFAULT = 420;
 const DRAWER_PREVIEW_MIN = 360;
+
+function WorkspaceSubnav({ label, items, selected, onSelect }) {
+  return <nav className="workspace-subnav" aria-label={`${label} sections`}>
+    {items.map(([id, title]) => <button key={id} type="button" aria-current={selected === id ? 'page' : undefined} className={selected === id ? 'active' : ''} onClick={() => onSelect(id)}>{title}</button>)}
+  </nav>;
+}
 
 function drawerMax() {
   // The preview stage sits 12px in from the left, so its width is
@@ -33,12 +43,17 @@ export default function Dashboard() {
   const { config, session, status: live, loading, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
   const frameRef = useRef(null);
   const replayWaiters = useRef(new Map());
+  const undoStack = useRef([]);
+  const undoPending = useRef(false);
   const [mode, setMode] = useState('off');
   const [selected, setSelected] = useState(null);
   const [anchorStatuses, setAnchorStatuses] = useState({});
   const [status, setStatus] = useState({ text: 'ready', kind: '' });
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
-  const [tab, setTab] = useState('feedback');
+  const [tab, setTab] = useState('review');
+  const [reviewTab, setReviewTab] = useState('feedback');
+  const [runtimeTab, setRuntimeTab] = useState('flows');
+  const [projectTab, setProjectTab] = useState('agents');
   const [reloadKey, setReloadKey] = useState(0);
   const [replayState, setReplayState] = useState(null);
   const [device, setDevice] = useState(() => { try { return ['desktop', 'tablet', 'phone'].includes(localStorage.getItem('uidit-device')) ? localStorage.getItem('uidit-device') : 'desktop'; } catch { return 'desktop'; } });
@@ -81,7 +96,12 @@ export default function Dashboard() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('workspace') === '0') setWorkspaceOpen(false);
     const initialTab = params.get('tab');
-    if (TABS.some(([id]) => id === initialTab)) setTab(initialTab);
+    if (TAB_GROUP[initialTab]) {
+      setTab(TAB_GROUP[initialTab]);
+      if (REVIEW_TABS.includes(initialTab)) setReviewTab(initialTab);
+      if (RUNTIME_TABS.some(([id]) => id === initialTab)) setRuntimeTab(initialTab);
+      if (PROJECT_TABS.some(([id]) => id === initialTab)) setProjectTab(initialTab);
+    }
   }, []);
 
   const targetUrl = config?.targetUrl ?? null;
@@ -92,20 +112,12 @@ export default function Dashboard() {
   }, [previewOrigin]);
 
   const showWorkspace = useCallback((nextTab = 'feedback') => {
-    setTab(TABS.some(([id]) => id === nextTab) ? nextTab : 'feedback');
+    setTab(TAB_GROUP[nextTab] ?? 'review');
+    if (REVIEW_TABS.includes(nextTab)) setReviewTab(nextTab);
+    if (RUNTIME_TABS.some(([id]) => id === nextTab)) setRuntimeTab(nextTab);
+    if (PROJECT_TABS.some(([id]) => id === nextTab)) setProjectTab(nextTab);
     setWorkspaceOpen(true);
   }, []);
-
-  const runShortcut = useCallback((key) => {
-    if (key === 'escape') {
-      toOverlay({ type: 'escape' });
-      if (mode !== 'off') setMode('off');
-      return;
-    }
-    if (key === 'i') { const next = mode === 'inspect' ? 'off' : 'inspect'; setMode(next); toOverlay({ type: 'mode', mode: next }); return; }
-    if (key === 'g' || key === 'c') { showWorkspace('feedback'); return; }
-    if (key === 'u') toOverlay({ type: 'showControls' });
-  }, [mode, showWorkspace, toOverlay]);
 
   const syncOverlay = useCallback(() => {
     toOverlay({ type: 'mode', mode });
@@ -113,6 +125,57 @@ export default function Dashboard() {
   }, [mode, session, dev, mcp.clientCount, config?.ui?.position, config?.ui?.allowBrowserInspection, theme, toOverlay]);
 
   const onStatus = useCallback((text, kind = '') => setStatus({ text, kind }), []);
+
+  const undoAction = useCallback(async (action) => {
+    if (action.pending) { action.undoRequested = true; return; }
+    if (!action.id || undoPending.current) return;
+    undoPending.current = true;
+    try {
+      await actions.remove('comments', action.id);
+      const index = undoStack.current.indexOf(action);
+      if (index >= 0) undoStack.current.splice(index, 1);
+      onStatus('Last comment undone', 'ok');
+    } catch (error) {
+      onStatus(`Could not undo comment: ${error.message}`, 'error');
+    } finally {
+      undoPending.current = false;
+    }
+  }, [actions, onStatus]);
+
+  const recordComment = useCallback(async (body) => {
+    const action = { type: 'comment', id: null, pending: true, undoRequested: false };
+    undoStack.current.push(action);
+    try {
+      const result = await actions.comment(body);
+      action.id = result.comment?.id ?? null;
+      action.pending = false;
+      if (!action.id) undoStack.current.splice(undoStack.current.indexOf(action), 1);
+      else if (action.undoRequested) undoAction(action);
+      return result;
+    } catch (error) {
+      const index = undoStack.current.indexOf(action);
+      if (index >= 0) undoStack.current.splice(index, 1);
+      throw error;
+    }
+  }, [actions, undoAction]);
+
+  const undoLast = useCallback(() => {
+    const action = undoStack.current.at(-1);
+    if (action) undoAction(action);
+  }, [undoAction]);
+
+  const reviewActions = useMemo(() => ({ ...actions, comment: recordComment }), [actions, recordComment]);
+
+  const runShortcut = useCallback((key) => {
+    if (key === 'undo') { undoLast(); return; }
+    if (key === 'escape') {
+      toOverlay({ type: 'escape' });
+      return;
+    }
+    if (key === 'i') { const next = mode === 'inspect' ? 'off' : 'inspect'; setMode(next); toOverlay({ type: 'mode', mode: next }); return; }
+    if (key === 'g' || key === 'c') { showWorkspace('feedback'); return; }
+    if (key === 'u') toOverlay({ type: 'showControls' });
+  }, [mode, showWorkspace, toOverlay, undoLast]);
 
   const bridgeApi = useCallback(async (msg) => {
     if (!PREVIEW_API.has(msg.route) || msg.method !== 'POST' || !msg.body || typeof msg.body !== 'object') throw new Error('Unsupported preview request');
@@ -130,7 +193,7 @@ export default function Dashboard() {
         const pageWidth = Number(body.drawing.pageWidth), pageHeight = Number(body.drawing.pageHeight);
         body.drawing = { type, points: points.map(({ x, y }) => ({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })), pageWidth: Number.isFinite(pageWidth) ? Math.max(1, Math.min(100000, pageWidth)) : null, pageHeight: Number.isFinite(pageHeight) ? Math.max(1, Math.min(100000, pageHeight)) : null };
       } else body.drawing = null;
-      return actions.comment(body);
+      return recordComment(body);
     }
     if (msg.route === '/element') {
       for (const key of ['selector', 'tag', 'page', 'text']) if (typeof body[key] === 'string') body[key] = body[key].slice(0, key === 'text' ? 300 : 2000);
@@ -141,13 +204,21 @@ export default function Dashboard() {
       if (typeof body.commentId !== 'string' || !body.commentId || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000) throw new Error('Reply text must be 1–4000 characters');
       return actions.reply(body.commentId.slice(0, 200), { text: body.text.trim(), author: 'reviewer' });
     }
+    if (msg.route === '/comment-update') {
+      if (typeof body.commentId !== 'string' || !body.commentId || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000) throw new Error('Comment text must be 1–4000 characters');
+      return actions.patch('comments', body.commentId.slice(0, 200), { text: body.text.trim() });
+    }
+    if (msg.route === '/comment-delete') {
+      if (typeof body.commentId !== 'string' || !body.commentId) throw new Error('Comment ID is required');
+      return actions.remove('comments', body.commentId.slice(0, 200));
+    }
     if (!['text', 'style', 'attribute', 'class', 'remove'].includes(body.kind)) throw new Error('Unsupported preview edit');
     body.before = body.before == null ? null : String(body.before).slice(0, 2000);
     body.after = body.after == null ? null : String(body.after).slice(0, 2000);
     if (typeof body.property === 'string') body.property = body.property.slice(0, 100);
     body.page = typeof body.page === 'string' ? body.page.slice(0, 2000) : null;
     return actions.edit(body);
-  }, [actions]);
+  }, [actions, recordComment]);
 
   useEffect(() => {
     if (!targetUrl || !previewOrigin) return;
@@ -184,6 +255,22 @@ export default function Dashboard() {
         syncOverlay();
       }
       if (msg.type === 'selected') setSelected(msg.element ?? null);
+      if (msg.type === 'comment-move' && typeof msg.commentId === 'string' && msg.patch && typeof msg.patch === 'object') {
+        const comment = session.comments.find((item) => item.id === msg.commentId);
+        const patch = msg.patch;
+        const finitePoint = (point, min, max) => point && Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= min && point.x <= max && point.y >= min && point.y <= max;
+        let valid = false;
+        if (comment?.drawing && Object.keys(patch).length === 1 && patch.drawing?.type === comment.drawing.type && Array.isArray(patch.drawing.points) && patch.drawing.points.length > 0 && patch.drawing.points.length <= 500) {
+          valid = patch.drawing.points.every((point) => finitePoint(point, 0, 1));
+        } else if (comment && !comment.drawing && Object.keys(patch).length === 1 && finitePoint(patch.markerOffset, -1, 1)) {
+          valid = true;
+        } else if (comment && !comment.drawing && Object.keys(patch).length === 1 && finitePoint(patch.anchor, 0, 1)) {
+          valid = true;
+        }
+        if (!valid) return;
+        actions.patch('comments', comment.id, patch).catch((error) => onStatus(`Could not move feedback: ${error.message}`, 'error'));
+        return;
+      }
       if (msg.type === 'browser-context') actions.browserContext(msg).catch((error) => onStatus(error.message, 'error'));
       if (msg.type === 'browser-diagnostics' && Array.isArray(msg.entries)) actions.browserDiagnostics(msg.entries).catch((error) => onStatus(error.message, 'error'));
       if (msg.type === 'browser-action-result' && typeof msg.id === 'string') actions.browserActionResult(msg.id, { ok: msg.ok === true, error: msg.error, result: msg.result }).catch((error) => onStatus(error.message, 'error'));
@@ -204,7 +291,7 @@ export default function Dashboard() {
           if (styles.length) { for (const style of styles) toOverlay({ type: 'style', property: style.property, value: style.value }); onStatus(`${String(msg.name ?? 'Design direction').slice(0, 50)} applied to the preview`, 'ok'); }
         }
         if (msg.action === 'comment' && typeof msg.text === 'string' && msg.text.trim()) {
-          try { await actions.comment({ text: msg.text.trim().slice(0, 4000), elementId: msg.elementId ?? null, page: typeof msg.page === 'string' ? msg.page.slice(0, 2000) : null }); onStatus('Comment saved to the shared review', 'ok'); }
+          try { await recordComment({ text: msg.text.trim().slice(0, 4000), elementId: msg.elementId ?? null, page: typeof msg.page === 'string' ? msg.page.slice(0, 2000) : null }); onStatus('Comment saved to the shared review', 'ok'); }
           catch (error) { onStatus(error.message, 'error'); }
         }
         if (msg.action === 'workspace') {
@@ -216,7 +303,7 @@ export default function Dashboard() {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [actions, bridgeApi, onStatus, previewOrigin, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
+  }, [actions, bridgeApi, onStatus, previewOrigin, recordComment, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
 
   useEffect(() => {
     if (!browserAction?.id) return;
@@ -260,15 +347,21 @@ export default function Dashboard() {
 
   useEffect(() => {
     const onKey = (event) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const typing = /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName ?? '') || event.target?.isContentEditable === true;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+        if (typing) return;
+        event.preventDefault();
+        undoLast();
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === 'Escape' && typing) { event.target.blur(); return; }
       if (typing) return;
       runShortcut(event.key.toLowerCase());
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [runShortcut]);
+  }, [runShortcut, undoLast]);
 
   const connect = async (url) => {
     try { await actions.setTargetUrl(url); setSelected(null); onStatus(`Connected to ${url}`, 'ok'); }
@@ -362,15 +455,13 @@ export default function Dashboard() {
       />
       <header className="workspace-head"><div><div className="workspace-brand">uidit <span>WORKSPACE</span></div><div className="workspace-caption">{(() => { try { return targetUrl ? new URL(targetUrl).host : 'Local development review'; } catch { return 'Local development review'; } })()}</div></div><div className="workspace-head-actions"><button className="theme-toggle" type="button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={changeTheme}>{theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}<span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button><button className="workspace-close" type="button" aria-label="Close workspace" onClick={() => setWorkspaceOpen(false)}>×</button></div></header>
       {targetUrl && <Toolbar compact config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} />}
-      <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'feedback' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
+      <nav className="workspace-tabs" aria-label="Review workspace sections">{TABS.map(([id, label, Icon]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} aria-label={label} title={label} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={15} strokeWidth={1.8} aria-hidden="true"/><span className="tab-label">{label}</span>{id === 'review' && session.comments.some((c) => !c.resolved) ? <span className="tab-count">{session.comments.filter((c) => !c.resolved).length}</span> : null}</button>)}</nav>
       <div className="workspace-content">
         <Suspense fallback={<div className="workspace-panel-loading" role="status">Loading workspace…</div>}>
-          {['feedback', 'inspect', 'changes'].includes(tab) && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={actions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={tab} showTabs={false} />}
+          {tab === 'review' && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={reviewActions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={reviewTab} onTab={setReviewTab} />}
           {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
-          {tab === 'flows' && <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} />}
-          {tab === 'server' && <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}
-          {tab === 'agents' && <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} />}
-          {tab === 'settings' && <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}
+          {tab === 'runtime' && <><WorkspaceSubnav label="Runtime" items={RUNTIME_TABS} selected={runtimeTab} onSelect={setRuntimeTab} /><div className="workspace-panel-slot">{runtimeTab === 'flows' ? <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} /> : <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}</div></>}
+          {tab === 'project' && <><WorkspaceSubnav label="Project" items={PROJECT_TABS} selected={projectTab} onSelect={setProjectTab} /><div className="workspace-panel-slot">{projectTab === 'agents' ? <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} /> : <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}</div></>}
         </Suspense>
       </div>
       <footer className="workspace-foot"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><span className="spacer" /><span>{live}</span></footer>

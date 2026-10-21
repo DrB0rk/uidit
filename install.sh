@@ -9,7 +9,7 @@
 set -eu
 
 REPO="DrB0rk/uidit"
-VERSION="0.10.3"
+VERSION="0.10.4"
 MIN_NODE_MAJOR=22
 
 say()  { printf '%s\n' "$*"; }

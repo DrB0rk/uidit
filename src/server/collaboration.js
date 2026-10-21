@@ -3,6 +3,7 @@ import path from 'node:path';
 import { uiditDir, readSession, mergeCollaborativeSession } from './store.js';
 
 const stateFile = (cwd) => path.join(uiditDir(cwd), 'runtime', 'collaboration.json');
+const DEFAULT_RELAY = 'https://share.uidit.app';
 function readState(cwd) {
   const file = stateFile(cwd);
   if (!fs.existsSync(file)) return null;
@@ -17,22 +18,17 @@ function writeState(cwd, state) {
 export class CollaborationManager {
   constructor({ cwd, hub }) {
     this.cwd = cwd; this.hub = hub; this.config = readState(cwd); this.socket = null; this.closed = false;
-    this.connected = false; this.participants = []; this.activity = []; this.lastError = null; this.retry = null; this.retryCount = 0;
+    this.connected = false; this.participants = []; this.activity = []; this.pageView = this.config?.pageView ?? null; this.lastError = null; this.retry = null; this.retryCount = 0; this.stopping = false;
     this.unsubscribe = hub.subscribe?.((type, session) => { if (type === 'session' && session) this.send({ type: 'sync', session }); });
     this.connect();
   }
   status() {
-    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, inviteExpiresAt: this.config?.inviteExpiresAt ?? null, participants: this.participants, activity: this.activity, error: this.lastError };
+    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, inviteExpiresAt: this.config?.inviteExpiresAt ?? null, pageView: this.pageView, participants: this.participants, activity: this.activity, error: this.lastError };
   }
   update() { this.hub.notifyCollaboration?.(this.status()); }
-  async createRoom({ relayUrl, adminSecret, project }) {
-    let endpoint;
-    try { endpoint = new URL(relayUrl); } catch { throw new Error('Enter a valid HTTPS relay URL'); }
-    if (!['https:', 'http:'].includes(endpoint.protocol) || (endpoint.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname))) throw new Error('Relay must use HTTPS (HTTP is allowed for localhost development)');
-    if (!adminSecret || adminSecret.length < 24 || adminSecret.length > 300) throw new Error('Relay admin secret must be at least 24 characters');
-    if (endpoint.pathname !== '/' || endpoint.search || endpoint.hash) throw new Error('Enter the relay origin only, without a path or query');
-    endpoint.search = ''; endpoint.hash = '';
-    const response = await fetch(new URL('/api/rooms', endpoint), { method: 'POST', headers: { authorization: `Bearer ${adminSecret}`, 'content-type': 'application/json' }, body: JSON.stringify({ project }) });
+  async createRoom({ project }) {
+    const endpoint = new URL(DEFAULT_RELAY);
+    const response = await fetch(new URL('/api/rooms', endpoint), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Relay room creation failed (${response.status})`);
     this.config = { relayUrl: endpoint.origin, roomId: data.roomId, ownerToken: data.ownerToken, inviteUrl: data.inviteUrl, inviteExpiresAt: data.inviteExpiresAt, project };
@@ -52,6 +48,49 @@ export class CollaborationManager {
     this.update();
     return this.status();
   }
+  async stopSharing() {
+    const config = this.config;
+    if (!config?.roomId || !config?.ownerToken) throw new Error('No active review link');
+    this.stopping = true;
+    try {
+      const response = await fetch(new URL(`/api/rooms/${config.roomId}`, config.relayUrl), { method: 'DELETE', headers: { authorization: `Bearer ${config.ownerToken}` } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Could not stop sharing (${response.status})`);
+      this.config = null;
+      clearTimeout(this.retry); this.retry = null;
+      this.socket?.close(1000, 'Review sharing stopped'); this.socket = null;
+      this.connected = false; this.participants = []; this.activity = []; this.pageView = null; this.lastError = null;
+      fs.rmSync(stateFile(this.cwd), { force: true });
+      this.update();
+      return this.status();
+    } catch (error) {
+      this.stopping = false;
+      if (this.config && !this.socket) this.connect();
+      throw error;
+    } finally { this.stopping = false; }
+  }
+  async setPageView(pageView) {
+    if (!this.config?.roomId || !this.config?.ownerToken) throw new Error('Create a review link before sharing the page view');
+    const response = await fetch(new URL(`/api/rooms/${this.config.roomId}/page-view`, this.config.relayUrl), { method: 'POST', headers: { authorization: `Bearer ${this.config.ownerToken}`, 'content-type': 'application/json' }, body: JSON.stringify(pageView) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Could not share page view (${response.status})`);
+    this.pageView = data.pageView;
+    this.config.pageView = data.pageView;
+    writeState(this.cwd, this.config);
+    this.update();
+    return data.pageView;
+  }
+  async sharePageSnapshot({ html, width, height, url }) {
+    if (!this.config?.roomId || !this.config?.ownerToken) throw new Error('Create a review link before sharing the page');
+    if (typeof html !== 'string' || !html.startsWith('<!doctype html>') || html.length > 2_000_000) throw new Error('The HTML page snapshot is missing or exceeds 2 MB');
+    let sharedPageUrl = String(url || '');
+    try {
+      const current = new URL(sharedPageUrl);
+      for (const key of [...current.searchParams.keys()]) if (/(?:token|secret|auth|session|password|credential|api.?key|^code$)/i.test(key)) current.searchParams.delete(key);
+      current.hash = ''; sharedPageUrl = current.href;
+    } catch { sharedPageUrl = ''; }
+    return this.setPageView({ html, width, height, url: sharedPageUrl });
+  }
   connect() {
     if (this.closed || !this.config?.roomId || this.socket) return;
     const url = new URL(`/api/rooms/${this.config.roomId}/socket`, this.config.relayUrl);
@@ -61,13 +100,13 @@ export class CollaborationManager {
     socket.addEventListener('message', (event) => {
       let message; try { message = JSON.parse(String(event.data)); } catch { return; }
       if (message.type === 'connected') {
-        this.retryCount = 0; this.connected = true; this.lastError = null; this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.update();
+        this.retryCount = 0; this.connected = true; this.lastError = null; this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.pageView = message.room?.pageView ?? null; this.update();
         this.send({ type: 'sync', session: readSession(this.cwd) });
       } else if (message.type === 'snapshot' || message.type === 'presence') {
         const prior = JSON.stringify(readSession(this.cwd).comments);
         try { mergeCollaborativeSession(this.cwd, message.room?.session); } catch (error) { this.lastError = error.message; }
         const current = readSession(this.cwd);
-        this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.update();
+        this.participants = message.room?.participants ?? []; this.activity = message.room?.activity ?? this.activity; this.pageView = message.room?.pageView ?? this.pageView; this.update();
         if (JSON.stringify(current.comments) !== prior) this.hub.notify();
       }
     });
@@ -75,7 +114,7 @@ export class CollaborationManager {
     socket.addEventListener('close', () => {
       if (this.socket === socket) this.socket = null;
       this.connected = false; this.participants = []; this.update();
-      if (!this.closed && this.config?.roomId) {
+      if (!this.closed && !this.stopping && this.config?.roomId) {
         const delay = Math.min(30000, 1000 * (2 ** Math.min(this.retryCount++, 5))) + Math.random() * 300;
         this.retry = setTimeout(() => this.connect(), delay); this.retry.unref?.();
       }
