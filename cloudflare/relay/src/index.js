@@ -69,17 +69,51 @@ export class CollaborationRoom extends DurableObject {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL)');
+      this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS payload_chunks (key TEXT NOT NULL, part INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY (key, part))');
     });
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
   async readState() {
     const row = this.ctx.storage.sql.exec('SELECT value FROM state WHERE id = 1').toArray()[0];
-    return row ? JSON.parse(row.value) : null;
+    if (!row) return null;
+    const state = JSON.parse(row.value);
+    const session = await this.readPayload('session');
+    const pageView = await this.readPayload('page-view');
+    if (session !== null) state.session = JSON.parse(session);
+    if (pageView !== null) state.pageView = JSON.parse(pageView);
+    // Migrate rooms written before payloads were chunked.
+    if (state.session || state.pageView) {
+      const legacySession = state.session;
+      const legacyPageView = state.pageView;
+      const hasSessionChunk = session !== null;
+      const hasPageViewChunk = pageView !== null;
+      if (!hasSessionChunk && legacySession) await this.savePayload('session', JSON.stringify(legacySession));
+      if (!hasPageViewChunk && legacyPageView) await this.savePayload('page-view', JSON.stringify(legacyPageView));
+      if (!hasSessionChunk && legacySession || !hasPageViewChunk && legacyPageView) this.saveState(state);
+    }
+    return state;
   }
 
   saveState(state) {
-    this.ctx.storage.sql.exec('INSERT INTO state (id, value) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value', JSON.stringify(state));
+    const { session, pageView, ...metadata } = state;
+    this.ctx.storage.sql.exec('INSERT INTO state (id, value) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value', JSON.stringify(metadata));
+  }
+
+  async readPayload(key) {
+    const chunks = this.ctx.storage.sql.exec('SELECT value FROM payload_chunks WHERE key = ? ORDER BY part', key).toArray();
+    return chunks.length ? chunks.map((chunk) => chunk.value).join('') : null;
+  }
+
+  async savePayload(key, value) {
+    this.ctx.storage.sql.exec('DELETE FROM payload_chunks WHERE key = ?', key);
+    for (let offset = 0, part = 0; offset < value.length; offset += 64_000, part++) {
+      this.ctx.storage.sql.exec('INSERT INTO payload_chunks (key, part, value) VALUES (?, ?, ?)', key, part, value.slice(offset, offset + 64_000));
+    }
+  }
+
+  clearPayload(key) {
+    this.ctx.storage.sql.exec('DELETE FROM payload_chunks WHERE key = ?', key);
   }
 
   async fetch(request) {
@@ -91,7 +125,7 @@ export class CollaborationRoom extends DurableObject {
       const now = new Date().toISOString();
       const expiresAt = inviteExpiry();
       const state = { roomId, project, createdAt: now, ownerHash: await digest(ownerToken), inviteHash: await digest(inviteToken), inviteExpiresAt: expiresAt, members: [], ownerRevision: -1, deletedCommentIds: [], session: { version: 1, revision: 0, updatedAt: now, elements: [], comments: [], edits: [] }, activity: [] };
-      this.saveState(state);
+      this.saveState(state); await this.savePayload('session', JSON.stringify(state.session));
       await this.ctx.storage.setAlarm(Date.parse(expiresAt));
       return json({ roomId, ownerToken, inviteToken, inviteExpiresAt: expiresAt });
     }
@@ -118,6 +152,7 @@ export class CollaborationRoom extends DurableObject {
       if (!secureEqual(await digest(ownerToken), state.ownerHash)) return json({ error: 'unauthorized' }, 401);
       await this.ctx.storage.deleteAlarm();
       this.saveState({ roomId: state.roomId, closed: true, closedAt: new Date().toISOString() });
+      this.clearPayload('session'); this.clearPayload('page-view');
       for (const socket of this.ctx.getWebSockets('room')) socket.close(1000, 'Review sharing stopped');
       return json({ closed: true });
     }
@@ -140,7 +175,7 @@ export class CollaborationRoom extends DurableObject {
       const isImageSnapshot = typeof body.dataUrl === 'string' && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(body.dataUrl) && body.dataUrl.length <= 3_400_000;
       if (!isHtmlSnapshot && !isImageSnapshot) return json({ error: 'provide a sanitized HTML snapshot up to 2 MB or a JPEG/PNG snapshot up to 2.5 MiB' }, 400);
       state.pageView = { ...(isHtmlSnapshot ? { html: body.html } : { dataUrl: body.dataUrl }), width, height, url: typeof body.url === 'string' ? body.url.slice(0, 2000) : '', capturedAt: new Date().toISOString() };
-      this.saveState(state); this.broadcast({ type: 'snapshot', room: this.publicState(state) });
+      this.saveState(state); await this.savePayload('page-view', JSON.stringify(state.pageView)); this.broadcast({ type: 'snapshot', room: this.publicState(state) });
       return json({ pageView: { width, height, url: state.pageView.url, kind: isHtmlSnapshot ? 'html' : 'image', capturedAt: state.pageView.capturedAt } });
     }
     if (url.pathname === '/join' && request.method === 'POST') {
@@ -197,13 +232,13 @@ export class CollaborationRoom extends DurableObject {
       const deleted = new Set(state.deletedCommentIds ?? []);
       state.session = { ...incoming, comments: this.mergeComments(state.session.comments ?? [], incoming.comments).filter((comment) => !deleted.has(comment.id)), elements: incoming.elements, edits: incoming.edits };
       state.ownerRevision = Math.max(state.ownerRevision, Number(incoming.revision) || 0);
-      this.saveState(state); this.broadcast({ type: 'snapshot', room: this.publicState(state) });
+      this.saveState(state); await this.savePayload('session', JSON.stringify(state.session)); this.broadcast({ type: 'snapshot', room: this.publicState(state) });
       return;
     }
     if (member.role === 'owner') return;
     const event = this.applyMemberAction(state, member, body);
     if (!event) return;
-    this.saveState(state);
+    this.saveState(state); await this.savePayload('session', JSON.stringify(state.session));
     this.broadcast({ type: 'command', event, memberId: member.memberId, name: member.name }, (ws) => ws.deserializeAttachment()?.role === 'owner');
     this.broadcast({ type: 'snapshot', room: this.publicState(state) });
   }
@@ -222,7 +257,11 @@ export class CollaborationRoom extends DurableObject {
     const now = new Date().toISOString();
     if (body.type === 'comment:add' && typeof body.text === 'string' && body.text.trim() && body.text.length <= 4000) {
       const point = body.point && Number.isFinite(body.point.x) && Number.isFinite(body.point.y) ? { x: Math.max(0, Math.min(1, body.point.x)), y: Math.max(0, Math.min(1, body.point.y)) } : null;
-      const comment = { id: `cm-${crypto.randomUUID()}`, text: body.text.trim(), page: typeof body.page === 'string' ? body.page.slice(0, 2000) : null, selector: typeof body.selector === 'string' ? body.selector.slice(0, 1000) : null, elementId: typeof body.elementId === 'string' ? body.elementId.slice(0, 200) : null, ...(point ? { point } : {}), source: 'collaborator', author: member.name, authorId: member.memberId, status: 'open', resolved: false, codeRefs: [], anchor: null, drawing: null, replies: [], createdAt: now, updatedAt: now };
+      const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+      if (attachments.length > 2 || attachments.some((item) => !item || typeof item.dataUrl !== 'string' || item.dataUrl.length > 420_000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(item.dataUrl))) return null;
+      const selector = typeof body.selector === 'string' ? body.selector.slice(0, 1000) : null;
+      const elementId = state.session.elements.find((item) => item.selector === selector)?.id ?? (typeof body.elementId === 'string' ? body.elementId.slice(0, 200) : null);
+      const comment = { id: `cm-${crypto.randomUUID()}`, text: body.text.trim(), page: typeof body.page === 'string' ? body.page.slice(0, 2000) : null, selector, elementId, ...(point ? { point } : {}), source: 'collaborator', author: member.name, authorId: member.memberId, status: 'open', resolved: false, codeRefs: [], anchor: point, drawing: null, attachments: attachments.map((item) => ({ dataUrl: item.dataUrl, name: typeof item.name === 'string' ? item.name.replace(/[\r\n]/g, '').slice(0, 120) : 'reference.jpg', width: Number.isInteger(item.width) ? Math.max(1, Math.min(1600, item.width)) : null, height: Number.isInteger(item.height) ? Math.max(1, Math.min(1600, item.height)) : null, mimeType: 'image/jpeg' })), replies: [], createdAt: now, updatedAt: now };
       state.session.comments.push(comment); state.session.revision += 1; state.session.updatedAt = now;
       this.note(state, 'comment', member.name, comment.text); return { type: 'comment:add', comment };
     }
@@ -235,6 +274,32 @@ export class CollaborationRoom extends DurableObject {
       state.session.revision += 1; state.session.updatedAt = now;
       this.note(state, 'comment-deleted', member.name, comment.text);
       return { type: 'comment:delete', commentId: comment.id };
+    }
+    if (body.type === 'comment:update') {
+      const isAuthor = comment.source === 'collaborator' && (comment.authorId ? comment.authorId === member.memberId : comment.author === member.name);
+      const patch = {};
+      if (body.text !== undefined) {
+        if (!isAuthor || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 4000) return null;
+        patch.text = body.text.trim();
+      }
+      if (body.status !== undefined) {
+        if (!['open', 'in_progress', 'needs_info'].includes(body.status)) return null;
+        patch.status = body.status;
+      }
+      if (body.resolved !== undefined) {
+        if (typeof body.resolved !== 'boolean') return null;
+        patch.resolved = body.resolved;
+      }
+      if (body.assignee !== undefined) {
+        const assignees = new Set(['Project owner', ...state.members.map((item) => item.name)]);
+        if (body.assignee !== null && (typeof body.assignee !== 'string' || !assignees.has(body.assignee))) return null;
+        patch.assignee = body.assignee;
+      }
+      if (!Object.keys(patch).length) return null;
+      Object.assign(comment, patch, { updatedAt: now });
+      state.session.revision += 1; state.session.updatedAt = now;
+      this.note(state, patch.resolved === true ? 'comment-resolved' : patch.resolved === false ? 'comment-reopened' : 'comment-updated', member.name, comment.text);
+      return { type: 'comment:update', commentId: comment.id, patch };
     }
     if (body.type === 'comment:reply' && typeof body.text === 'string' && body.text.trim() && body.text.length <= 4000) {
       const reply = { id: `rp-${crypto.randomUUID()}`, text: body.text.trim(), author: 'reviewer', displayName: member.name, source: 'collaborator', createdAt: now };
@@ -253,7 +318,7 @@ export class CollaborationRoom extends DurableObject {
       comments: state.session.comments.filter((comment) => !(state.deletedCommentIds ?? []).includes(comment.id)),
       deletedCommentIds: state.deletedCommentIds ?? [],
       elements: state.session.elements.map(({ id, selector }) => ({ id, selector })),
-      edits: [],
+      edits: state.session.edits.map(({ id, kind, elementId, property, before, after, applied, createdAt }) => ({ id, kind, elementId, property, before, after, applied, createdAt })),
     };
     const pageView = state.pageView ? { width: state.pageView.width, height: state.pageView.height, url: state.pageView.url, kind: state.pageView.html ? 'html' : 'image', capturedAt: state.pageView.capturedAt } : null;
     return { roomId: state.roomId, project: state.project, session, pageView, participants, activity: state.activity };

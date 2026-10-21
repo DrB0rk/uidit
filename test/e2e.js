@@ -61,7 +61,7 @@ try {
   await shareCard.getByRole('button', { name: 'Create link' }).click();
   assert.equal(await shareCard.getByLabel('Team review share link').inputValue(), shareUrl, 'one click creates a uidit.app review link');
   assert.equal(await shareCard.locator('input[type="password"]').count(), 0, 'sharing never asks for a relay secret');
-  assert.match(await shareCard.innerText(), /static HTML snapshot for reviewers; scripts and controls are disabled/);
+  assert.match(await shareCard.innerText(), /captures a static HTML snapshot automatically; scripts and controls are disabled/);
   await page.route(`http://127.0.0.1:${DASH}/api/collaboration/stop`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ collaboration: { enabled: false, connected: false, participants: [] } }) }));
   page.once('dialog', (dialog) => dialog.accept());
   await shareCard.getByRole('button', { name: 'Stop sharing' }).click();

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.5 — 2026-10-22
+
+- Rebuilt the hosted team review page as a compact UIDIT workspace with Review, Design, Runtime, and Project panels. Reviewers can inspect the HTML snapshot, pin feedback, reply, edit or delete their own comments, manage status and assignment, add reference photos, and view shared changes and activity.
+- Team links now appear immediately while HTML capture runs in the background. Snapshot assets are fetched concurrently, and capture status is visible in the local dashboard.
+- Store relay snapshots and sessions in bounded SQLite chunks so large snapshots fit safely and ordinary collaboration updates do not rewrite the HTML payload.
+
 ## 0.10.4 — 2026-10-21
 
 - Team review links now share a self-contained, sanitized HTML snapshot instead of exposing a live preview through a tunnel. Reviewers can inspect elements, pin feedback, reply, and delete their own comments; owners can stop sharing completely.

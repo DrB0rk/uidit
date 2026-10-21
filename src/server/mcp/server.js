@@ -334,6 +334,21 @@ function makeMcp({ cwd, processManager, serviceManager, hub }) {
 export async function startMcpServer({ cwd = process.cwd(), port = store.DEFAULT_CONTROL_PORT, fallbackPort = store.FALLBACK_CONTROL_PORT, previewPort = 7717, processManager, serviceManager, hub, collaborationManager = null }) {
   const token = tokenFor(cwd);
   const sessions = new Map();
+  let activePageCapture = null;
+  const capturePageView = () => {
+    if (!collaborationManager?.status().enabled) return Promise.reject(new Error('Create a review link before sharing the page view'));
+    if (activePageCapture) return activePageCapture;
+    collaborationManager.setSnapshotCapture?.('capturing');
+    activePageCapture = (async () => {
+      const capture = await hub.requestBrowserAction({ type: 'share-page-view' }, 15000);
+      const viewport = capture.result ?? hub.browserContext?.viewport ?? {};
+      return collaborationManager.sharePageSnapshot({ html: capture.result?.html, width: Math.round(Number(viewport.width) || 1280), height: Math.round(Number(viewport.height) || 800), url: capture.result?.url ?? hub.browserContext?.url });
+    })().catch((error) => {
+      collaborationManager.setSnapshotCapture?.('failed', error.message);
+      throw error;
+    }).finally(() => { activePageCapture = null; });
+    return activePageCapture;
+  };
   const unsubscribeHub = hub.subscribe?.((type) => {
     const urisByEvent = {
       session: ['uidit://session', 'uidit://feedback/open', 'uidit://edits/pending', 'uidit://tasks', 'uidit://proposals', 'uidit://project/context', 'uidit://agent/brief'],
@@ -404,14 +419,14 @@ export async function startMcpServer({ cwd = process.cwd(), port = store.DEFAULT
       if (route === '/api/collaboration/room' && req.method === 'POST') {
         if (!collaborationManager) throw new Error('Collaboration relay is unavailable');
         const collaboration = await collaborationManager.createRoom({ project: path.basename(path.resolve(cwd)) });
-        return sendJson(res, 201, { collaboration });
+        // Return the invite immediately; capture continues in the preview and publishes its state over SSE.
+        void capturePageView().catch(() => {});
+        return sendJson(res, 201, { collaboration: collaborationManager.status() });
       }
       if (route === '/api/collaboration/page-view' && req.method === 'POST') {
         await readJson(req);
         if (!collaborationManager?.status().enabled) return sendJson(res, 409, { error: 'Create a review link before sharing the page view' });
-        const capture = await hub.requestBrowserAction({ type: 'share-page-view' }, 25000);
-        const viewport = capture.result ?? hub.browserContext?.viewport ?? {};
-        const pageView = await collaborationManager.sharePageSnapshot({ html: capture.result?.html, width: Math.round(Number(viewport.width) || 1280), height: Math.round(Number(viewport.height) || 800), url: capture.result?.url ?? hub.browserContext?.url });
+        const pageView = await capturePageView();
         return sendJson(res, 200, { pageView });
       }
       if (route === '/api/collaboration/revoke-invite' && req.method === 'POST') {

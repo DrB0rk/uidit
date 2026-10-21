@@ -314,27 +314,44 @@
     const clone = source.cloneNode(true);
     const sourceNodes = [source, ...source.querySelectorAll('*')];
     const cloneNodes = [clone, ...clone.querySelectorAll('*')];
-    let embeddedAssetBytes = 0, assetFetches = 0;
+    let embeddedAssetBytes = 0;
     const assetCache = new Map();
-    const inlineLocalAsset = async (rawUrl) => {
+    const assetUrl = (rawUrl) => {
       try {
         const url = new URL(rawUrl, location.href);
-        if (url.origin !== location.origin || !url.pathname.startsWith('/proxy/') || embeddedAssetBytes >= 1_200_000 || assetFetches >= 20) return null;
-        if (assetCache.has(url.href)) return assetCache.get(url.href);
-        assetCache.set(url.href, null); assetFetches += 1;
+        return url.origin === location.origin && url.pathname.startsWith('/proxy/') ? url.href : null;
+      } catch { return null; }
+    };
+    const inlineLocalAsset = async (url) => {
+      try {
+        if (!url || embeddedAssetBytes >= 1_200_000) return null;
         const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 700);
-        const response = await fetch(url.href, { credentials: 'same-origin', signal: controller.signal }).finally(() => clearTimeout(timeout));
+        const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal }).finally(() => clearTimeout(timeout));
         const mime = response.headers.get('content-type')?.split(';')[0] || '';
         const blob = await response.blob();
         if (!response.ok || !/^image\/(?:jpeg|png|gif|webp|avif)$/.test(mime) || blob.size > 400_000 || embeddedAssetBytes + blob.size > 1_200_000) return null;
         embeddedAssetBytes += blob.size;
         const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
         for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-        const dataUrl = `data:${mime};base64,${btoa(binary)}`; assetCache.set(url.href, dataUrl); return dataUrl;
+        return `data:${mime};base64,${btoa(binary)}`;
       } catch { return null; }
     };
     const visualProperties = 'display visibility position inset top right bottom left z-index box-sizing width min-width max-width height min-height max-height margin margin-top margin-right margin-bottom margin-left padding padding-top padding-right padding-bottom padding-left overflow overflow-x overflow-y flex flex-direction flex-wrap flex-grow flex-shrink flex-basis align-items align-content align-self justify-content justify-items gap row-gap column-gap grid grid-template-columns grid-template-rows grid-column grid-row order float clear transform transform-origin opacity color background-color background-image background-size background-position background-repeat border border-top border-right border-bottom border-left border-radius box-shadow object-fit object-position font-family font-size font-style font-weight line-height letter-spacing text-align text-decoration text-transform white-space word-break overflow-wrap list-style list-style-type cursor';
     const properties = visualProperties.split(' ');
+    const backgroundAssets = [];
+    const imageAssets = [];
+    for (let index = 0; index < sourceNodes.length; index += 1) {
+      const original = sourceNodes[index];
+      if (original.closest?.('[data-uidit-ui]')) continue;
+      const background = getComputedStyle(original).getPropertyValue('background-image');
+      for (const match of background.matchAll(/url\((?:"|')?(.*?)(?:"|')?\)/g)) backgroundAssets.push(assetUrl(match[1]));
+      if (original.matches?.('img')) imageAssets.push(assetUrl(original.currentSrc || original.getAttribute('src') || ''));
+    }
+    // Fetch a bounded, de-duplicated set concurrently. A slow local image cannot hold
+    // the rest of the snapshot hostage, and all results still pass the byte/type caps.
+    const candidates = [...new Set([...backgroundAssets, ...imageAssets].filter(Boolean))].slice(0, 20);
+    await Promise.all(candidates.map(async (url) => assetCache.set(url, await inlineLocalAsset(url))));
+    const embeddedAsset = (rawUrl) => assetCache.get(assetUrl(rawUrl)) ?? null;
     for (let index = 0; index < sourceNodes.length; index += 1) {
       const original = sourceNodes[index], target = cloneNodes[index];
       if (!target || original.closest?.('[data-uidit-ui]')) continue;
@@ -344,7 +361,7 @@
         let value = computed.getPropertyValue(name);
         if (name === 'background-image' && value.includes('url(')) {
           const matches = [...value.matchAll(/url\((?:"|')?(.*?)(?:"|')?\)/g)];
-          for (const match of matches) { const dataUrl = await inlineLocalAsset(match[1]); if (dataUrl) value = value.replace(match[0], `url("${dataUrl}")`); }
+          for (const match of matches) { const dataUrl = embeddedAsset(match[1]); if (dataUrl) value = value.replace(match[0], `url("${dataUrl}")`); }
         }
         declarations.push(`${name}:${value}`);
       }
@@ -365,7 +382,7 @@
     for (const [original, image] of imagePairs) {
       if (!image?.isConnected) continue;
       image.removeAttribute('srcset');
-      const embedded = await inlineLocalAsset(original?.currentSrc || image.getAttribute('src') || '');
+      const embedded = embeddedAsset(original?.currentSrc || image.getAttribute('src') || '');
       if (embedded) image.setAttribute('src', embedded);
       else {
         try { const asset = new URL(image.getAttribute('src') || '', location.href); if (asset.origin === location.origin && asset.pathname.startsWith('/proxy/')) image.setAttribute('src', `${window.__UIDIT_TARGET__}${asset.pathname.slice('/proxy'.length)}${asset.search}`); }

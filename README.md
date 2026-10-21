@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.4">Latest release: v0.10.4</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.5">Latest release: v0.10.5</a> · Node.js 22+</p>
 
 ---
 
@@ -32,7 +32,7 @@ exiting. From a clone instead: `npm install -g .`
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.4/drb0rk-uidit-0.10.4.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.5/drb0rk-uidit-0.10.5.tgz
 ```
 
 ## Use

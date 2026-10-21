@@ -18,12 +18,12 @@ function writeState(cwd, state) {
 export class CollaborationManager {
   constructor({ cwd, hub }) {
     this.cwd = cwd; this.hub = hub; this.config = readState(cwd); this.socket = null; this.closed = false;
-    this.connected = false; this.participants = []; this.activity = []; this.pageView = this.config?.pageView ?? null; this.lastError = null; this.retry = null; this.retryCount = 0; this.stopping = false;
+    this.connected = false; this.participants = []; this.activity = []; this.pageView = this.config?.pageView ?? null; this.snapshotCapture = this.config?.snapshotCapture ?? { state: 'idle' }; this.lastError = null; this.retry = null; this.retryCount = 0; this.stopping = false;
     this.unsubscribe = hub.subscribe?.((type, session) => { if (type === 'session' && session) this.send({ type: 'sync', session }); });
     this.connect();
   }
   status() {
-    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, inviteExpiresAt: this.config?.inviteExpiresAt ?? null, pageView: this.pageView, participants: this.participants, activity: this.activity, error: this.lastError };
+    return { enabled: Boolean(this.config?.roomId), connected: this.connected, roomId: this.config?.roomId ?? null, project: this.config?.project ?? null, relayUrl: this.config?.relayUrl ?? null, inviteUrl: this.config?.inviteUrl ?? null, inviteExpiresAt: this.config?.inviteExpiresAt ?? null, pageView: this.pageView, snapshotCapture: this.snapshotCapture, participants: this.participants, activity: this.activity, error: this.lastError };
   }
   update() { this.hub.notifyCollaboration?.(this.status()); }
   async createRoom({ project }) {
@@ -32,6 +32,7 @@ export class CollaborationManager {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Relay room creation failed (${response.status})`);
     this.config = { relayUrl: endpoint.origin, roomId: data.roomId, ownerToken: data.ownerToken, inviteUrl: data.inviteUrl, inviteExpiresAt: data.inviteExpiresAt, project };
+    this.snapshotCapture = { state: 'idle' };
     writeState(this.cwd, this.config); this.lastError = null; this.connect(); this.update();
     return this.status();
   }
@@ -59,7 +60,7 @@ export class CollaborationManager {
       this.config = null;
       clearTimeout(this.retry); this.retry = null;
       this.socket?.close(1000, 'Review sharing stopped'); this.socket = null;
-      this.connected = false; this.participants = []; this.activity = []; this.pageView = null; this.lastError = null;
+      this.connected = false; this.participants = []; this.activity = []; this.pageView = null; this.snapshotCapture = { state: 'idle' }; this.lastError = null;
       fs.rmSync(stateFile(this.cwd), { force: true });
       this.update();
       return this.status();
@@ -76,9 +77,22 @@ export class CollaborationManager {
     if (!response.ok) throw new Error(data.error || `Could not share page view (${response.status})`);
     this.pageView = data.pageView;
     this.config.pageView = data.pageView;
+    this.snapshotCapture = { state: 'ready', capturedAt: data.pageView?.capturedAt ?? new Date().toISOString() };
+    this.config.snapshotCapture = this.snapshotCapture;
     writeState(this.cwd, this.config);
     this.update();
     return data.pageView;
+  }
+  setSnapshotCapture(state, error = null) {
+    if (!this.config?.roomId) return;
+    this.snapshotCapture = {
+      state,
+      ...(state === 'capturing' ? { startedAt: new Date().toISOString() } : {}),
+      ...(error ? { error: String(error).slice(0, 300) } : {}),
+    };
+    this.config.snapshotCapture = this.snapshotCapture;
+    writeState(this.cwd, this.config);
+    this.update();
   }
   async sharePageSnapshot({ html, width, height, url }) {
     if (!this.config?.roomId || !this.config?.ownerToken) throw new Error('Create a review link before sharing the page');

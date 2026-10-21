@@ -82,8 +82,11 @@ test('shared HTML snapshots are bounded and remove sensitive query values', asyn
   };
   try {
     manager.config = { relayUrl: 'https://share.uidit.app', roomId: 'room-1', ownerToken: 'owner-secret' };
+    manager.setSnapshotCapture('capturing');
+    assert.equal(manager.status().snapshotCapture.state, 'capturing');
     const pageView = await manager.sharePageSnapshot({ html: '<!doctype html><html><body>Preview</body></html>', width: 1280, height: 800, url: 'http://127.0.0.1:4321/?session=private&tab=home' });
     assert.equal(pageView.kind, 'html');
+    assert.equal(manager.status().snapshotCapture.state, 'ready');
     assert.equal(sent.url, 'https://share.uidit.app/api/rooms/room-1/page-view');
     assert.equal(sent.body.url, 'http://127.0.0.1:4321/?tab=home');
     assert.match(sent.body.html, /Preview/);
@@ -402,6 +405,33 @@ test('new projects default to port 12321 and the control server tries its fallba
     await running?.close();
     await new Promise((resolve) => occupied.close(resolve));
   }
+});
+
+test('creating a review link returns before its HTML snapshot finishes capturing', async () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const portServer = net.createServer();
+  const port = await new Promise((resolve) => portServer.listen(0, '127.0.0.1', () => { const value = portServer.address().port; portServer.close(() => resolve(value)); }));
+  let resolveCapture;
+  const capture = new Promise((resolve) => { resolveCapture = resolve; });
+  const collaboration = {
+    enabled: false,
+    snapshotCapture: { state: 'idle' },
+    status() { return { enabled: this.enabled, snapshotCapture: this.snapshotCapture }; },
+    async createRoom() { this.enabled = true; return this.status(); },
+    setSnapshotCapture(state, error) { this.snapshotCapture = { state, ...(error ? { error } : {}) }; },
+    async sharePageSnapshot(value) { this.snapshotCapture = { state: 'ready' }; return { kind: 'html', capturedAt: '2026-10-22T00:00:00.000Z', ...value }; },
+  };
+  const hub = { subscribe: () => () => {}, requestBrowserAction: () => capture };
+  const running = await startMcpServer({ cwd, port, fallbackPort: port + 1, previewPort: 0, hub, collaborationManager: collaboration });
+  try {
+    const response = await fetch(`http://127.0.0.1:${running.port}/api/collaboration/room`, { method: 'POST', headers: { origin: `http://127.0.0.1:${running.port}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(response.status, 201);
+    assert.equal((await response.json()).collaboration.snapshotCapture.state, 'capturing');
+    resolveCapture({ result: { html: '<!doctype html><html><body>Fast review</body></html>', width: 800, height: 600, url: 'http://127.0.0.1:4321/' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(collaboration.snapshotCapture.state, 'ready');
+  } finally { await running.close(); }
 });
 
 test('concurrent writers never discard each other\'s records', async () => {
