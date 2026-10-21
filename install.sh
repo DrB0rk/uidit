@@ -9,7 +9,9 @@
 set -eu
 
 REPO="DrB0rk/uidit"
-BRANCH="master"
+VERSION="0.10.1"
+PACKAGE="@drb0rk/uidit"
+REGISTRY="https://npm.pkg.github.com"
 MIN_NODE_MAJOR=22
 
 say()  { printf '%s\n' "$*"; }
@@ -34,32 +36,47 @@ fi
 printf '  node %s · npm %s\n' "$(node -v)" "$(npm -v)"
 
 # --- install ------------------------------------------------------------------
-# Two routes, because neither works everywhere:
-#   1. the npm registry (preferred when published)
-#   2. the GitHub source tarball — npm >= 12 refuses git: installs outright, so the
-#      tarball is the route that keeps working on modern npm.
-TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
+# GitHub Packages requires authentication even for public npm packages. Use a
+# configured npm credential or an explicit classic PAT, then fall back to the
+# same tagged GitHub source when registry access is unavailable.
+TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/refs/tags/v${VERSION}"
 TARBALL="$(mktemp -t uidit.XXXXXX.tar.gz)"
-trap 'rm -f "$TARBALL"' EXIT INT TERM
+NPMRC=""
+trap 'rm -f "$TARBALL"; [ -z "$NPMRC" ] || rm -f "$NPMRC"' EXIT INT TERM
 
 installed=""
-if npm install -g uidit >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
-  installed="registry"
-  printf '  installed from the npm registry\n'
-else
-  say "  installing from GitHub source"
+GH_PACKAGES_TOKEN="${GH_PACKAGES_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+NPMRC="$(mktemp -t uidit-npmrc.XXXXXX)"
+chmod 600 "$NPMRC"
+USER_NPMRC="$(npm config get userconfig 2>/dev/null || true)"
+if [ -n "$USER_NPMRC" ] && [ -r "$USER_NPMRC" ]; then cat "$USER_NPMRC" > "$NPMRC"; fi
+printf '\n@drb0rk:registry=%s\n' "$REGISTRY" >> "$NPMRC"
+if [ -n "$GH_PACKAGES_TOKEN" ]; then
+  printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_PACKAGES_TOKEN" >> "$NPMRC"
+  unset GH_PACKAGES_TOKEN
+fi
+if NPM_CONFIG_USERCONFIG="$NPMRC" npm install -g "${PACKAGE}@${VERSION}" >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
+  installed="GitHub Packages"
+fi
+
+if [ -z "$installed" ]; then
+  say "  GitHub Packages unavailable; installing the tagged source release"
   curl -fsSL "$TARBALL_URL" -o "$TARBALL" || die "could not download $TARBALL_URL
   Check the URL manually, or clone https://github.com/${REPO} and run: npm install -g ."
   npm install -g "$TARBALL" >/dev/null 2>&1 || die "npm install failed.
   Re-run with the log: sh -x <(curl -fsSL $0) 2>&1 | tail -40"
-  installed="source"
+  installed="GitHub source"
+fi
+
+if [ "$installed" = "GitHub Packages" ]; then
+  printf '  installed from GitHub Packages\n'
 fi
 
 # npm >= 11 blocks dependency install scripts unless explicitly allowed, so the
 # dashboard UI may not have been built during install. Build it now — `uidit start`
 # would otherwise build on first launch and look broken meanwhile.
 UI_BUILT=""
-for d in "$(npm prefix -g)/lib/node_modules/uidit" "$(npm prefix -g)/node_modules/uidit"; do
+for d in "$(npm prefix -g)/lib/node_modules/@drb0rk/uidit" "$(npm prefix -g)/node_modules/@drb0rk/uidit"; do
   [ -f "$d/dashboard/dist/index.html" ] && { UI_BUILT=1; break; }
 done
 

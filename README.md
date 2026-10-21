@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.0">Latest release: v0.10.0</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.1">Latest release: v0.10.1</a> · Node.js 22+</p>
 
 ---
 
@@ -26,7 +26,18 @@ curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
 
 Needs Node 22+ and npm. The installer checks for both, installs the `uidit`
-command, and verifies it runs before exiting. From a clone instead: `npm install -g .`
+command, and verifies it runs before exiting. It uses GitHub Packages when npm is
+authenticated for `@drb0rk`, and otherwise installs the matching tagged source.
+GitHub Packages requires a classic PAT with `read:packages`; configure npm with
+`npm login --scope=@drb0rk --auth-type=legacy --registry=https://npm.pkg.github.com`
+or set `GH_PACKAGES_TOKEN` to that token before running the installer. From a
+clone instead: `npm install -g .`
+
+To install directly from GitHub Packages after authenticating:
+
+```sh
+npm install -g @drb0rk/uidit@0.10.1 --registry=https://npm.pkg.github.com
+```
 
 ## Use
 

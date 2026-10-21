@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 — 2026-10-21
+
+- Published the scoped `@drb0rk/uidit` package to GitHub Packages and added a release workflow that runs the build and full test suite before publishing.
+- Updated the installer to install the exact release from GitHub Packages when authenticated, or fall back to the matching GitHub source tag. It accepts a classic PAT through `GH_PACKAGES_TOKEN` without writing credentials to the user's npm config.
+
 ## 0.10.0 — 2026-10-21
 
 - Inspect is now a toggleable tool: the first click selects an element, a second click edits its text in place, and Escape ends the active tool without closing the workspace.

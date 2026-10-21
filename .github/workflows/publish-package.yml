@@ -1,0 +1,32 @@
+name: Publish GitHub Package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:dashboard
+      - run: npm test
+      - name: Publish package to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '//npm.pkg.github.com/:_authToken=%s\n@drb0rk:registry=https://npm.pkg.github.com\n' "$NODE_AUTH_TOKEN" > "$RUNNER_TEMP/github-npmrc"
+          chmod 600 "$RUNNER_TEMP/github-npmrc"
+          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/github-npmrc" npm publish
