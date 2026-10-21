@@ -5,7 +5,7 @@ on:
     types: [published]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -23,6 +23,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build:dashboard
       - run: npm test
+      - name: Build public install tarball
+        run: npm pack --ignore-scripts
+      - name: Attach tarball to the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" drb0rk-uidit-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
       - name: Publish package to GitHub Packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

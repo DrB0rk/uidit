@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2 — 2026-10-21
+
+- Added a public install tarball to each GitHub release. The installer now uses that anonymous download by default, with authenticated GitHub Packages installation as an option.
+- The release workflow attaches the tarball after the build and test suite pass, then publishes the scoped npm package.
+
 ## 0.10.1 — 2026-10-21
 
 - Published the scoped `@drb0rk/uidit` package to GitHub Packages and added a release workflow that runs the build and full test suite before publishing.
