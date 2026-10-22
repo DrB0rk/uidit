@@ -391,6 +391,23 @@ try {
   const prompt = await client.getPrompt({ name: 'uidit_work_on_feedback', arguments: { focus: 'breathing room' } });
   assert.match(prompt.messages[0].content.text, /uidit_reply_comment/);
   assert.match(prompt.messages[0].content.text, /breathing room/);
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const bridge = new Client({ name: 'uidit-stdio-e2e', version: '1.0.0' }, { capabilities: {} });
+  await bridge.connect(new StdioClientTransport({ command: process.execPath, args: [`${UIDIT}/bin/uidit.js`, 'mcp', 'stdio'], cwd: ROOT, stderr: 'inherit' }));
+  try {
+    const bridgedTools = await bridge.listTools();
+    assert.equal(bridgedTools.tools.length, (await client.listTools()).tools.length, 'stdio bridge exposes the HTTP MCP tools');
+    const bridgedResources = await bridge.listResources();
+    assert.equal(bridgedResources.resources.length, (await client.listResources()).resources.length, 'stdio bridge exposes the HTTP MCP resources');
+    const bridgedResource = await bridge.readResource({ uri: 'uidit://agent/brief' });
+    assert.ok(JSON.parse(bridgedResource.contents[0].text).feedback.length > 0);
+    const bridgedPrompts = await bridge.listPrompts();
+    assert.ok(bridgedPrompts.prompts.some((item) => item.name === 'uidit_work_on_feedback'));
+    const bridgedPrompt = await bridge.getPrompt({ name: 'uidit_work_on_feedback', arguments: { focus: 'breathing room' } });
+    assert.match(bridgedPrompt.messages[0].content.text, /Give the heading more breathing room/);
+    const bridgedContext = await bridge.callTool({ name: 'uidit_get_context', arguments: {} });
+    assert.equal(Boolean(bridgedContext.isError), false, JSON.stringify(bridgedContext));
+  } finally { await bridge.close(); }
   const codeLink = await client.callTool({ name: 'uidit_link_code', arguments: { commentId: headingComment.id, file: 'src/components/Checkout.tsx', startLine: 18, endLine: 24 } });
   assert.equal(Boolean(codeLink.isError), false, JSON.stringify(codeLink));
   const latestRevision = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).revision;
@@ -601,6 +618,7 @@ try {
   // Record a real preview action with a screenshot, stop, then replay it.
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Runtime/ }).click();
   await page.locator('.workspace-subnav').getByRole('button', { name: 'Flows', exact: true }).click();
+  await page.locator('#uidit-flow-name').waitFor();
   await page.locator('#uidit-flow-name').fill('Checkout button smoke flow');
   await page.getByRole('button', { name: 'Start recording' }).click();
   await page.waitForTimeout(150);

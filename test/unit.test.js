@@ -13,11 +13,13 @@ import * as taskStore from '../src/server/tasks.js';
 import { impactGraph, gitContext, projectContext } from '../src/server/project-context.js';
 import { auditBrowserContext } from '../src/server/audit.js';
 import { exportFlowAsPlaywright } from '../src/server/flow-export.js';
-import { createServiceManager } from '../src/server/process-manager.js';
+import { createProcessManager, createServiceManager } from '../src/server/process-manager.js';
 import { createSelectiveVerifier } from '../src/server/verification.js';
 import { describeReviewActions, runReviewAction } from '../src/actions/review.js';
 import { assertAgentWritesAllowed } from '../src/server/agent-policy.js';
-import { startMcpServer } from '../src/server/mcp/server.js';
+import { readMcpToken, startMcpServer } from '../src/server/mcp/server.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { CollaborationManager } from '../src/server/collaboration.js';
 import { createHub } from '../src/server/realtime.js';
 
@@ -405,6 +407,51 @@ test('new projects default to port 12321 and the control server tries its fallba
   } finally {
     await running?.close();
     await new Promise((resolve) => occupied.close(resolve));
+  }
+});
+
+test('MCP restart uses the configured dev URL when the command prints no URL', async () => {
+  const cwd = tmpProject();
+  store.init(cwd, { force: true });
+  const portServer = net.createServer();
+  const devPort = await new Promise((resolve, reject) => {
+    portServer.once('error', reject);
+    portServer.listen(0, '127.0.0.1', () => {
+      const port = portServer.address().port;
+      portServer.close(() => resolve(port));
+    });
+  });
+  store.writeConfig(cwd, {
+    mcp: { allowAgentServerControl: true },
+    dev: {
+      command: [process.execPath, '-e', `require('node:http').createServer((req,res)=>res.end('ready')).listen(${devPort},'127.0.0.1')`],
+      cwd: '.',
+      url: `http://127.0.0.1:${devPort}/`,
+      autoStart: false,
+    },
+  });
+  const controlPortServer = net.createServer();
+  const controlPort = await new Promise((resolve, reject) => {
+    controlPortServer.once('error', reject);
+    controlPortServer.listen(0, '127.0.0.1', () => {
+      const port = controlPortServer.address().port;
+      controlPortServer.close(() => resolve(port));
+    });
+  });
+  const hub = { subscribe: () => () => {}, notifyMcp() {} };
+  const processManager = createProcessManager({ cwd, timeout: 5000 });
+  const running = await startMcpServer({ cwd, port: controlPort, fallbackPort: controlPort + 1, previewPort: 0, hub, processManager });
+  const client = new Client({ name: 'uidit-restart-test', version: '1.0.0' }, { capabilities: {} });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(running.url), { requestInit: { headers: { Authorization: `Bearer ${readMcpToken(cwd)}` } } }));
+    const restarted = await client.callTool({ name: 'uidit_restart_dev', arguments: {} });
+    assert.equal(Boolean(restarted.isError), false, JSON.stringify(restarted));
+    assert.equal(restarted.structuredContent.state, 'ready');
+    assert.equal(restarted.structuredContent.url, `http://127.0.0.1:${devPort}/`);
+  } finally {
+    await client.callTool({ name: 'uidit_stop_dev', arguments: {} }).catch(() => {});
+    await client.close().catch(() => {});
+    await running.close();
   }
 });
 

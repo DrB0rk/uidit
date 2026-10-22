@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.8 — 2026-10-22
+
+- Complete the stdio MCP bridge for prompts and forward prompt, resource, and tool list-change notifications.
+- Pass the configured development URL through MCP restarts so quiet dev commands become ready without waiting for URL output.
+- Wait for the lazily loaded flow recorder before browser tests interact with it.
+
 ## 0.10.7 — 2026-10-22
 
 - Overhauled the curl installer with numbered progress, visible download progress,
