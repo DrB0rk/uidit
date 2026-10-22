@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.6 — 2026-10-22
+
+- Added a local live browser activity view for MCP-driven actions. The preview
+  shows an isolated cursor and target outline while an authorized action runs;
+  Agents shows only bounded action/status metadata. Values, selectors, URLs,
+  page text, and browser exception output are excluded.
+- Kept browser inspection and browser control as separate opt-ins. Revoking a
+  relevant permission clears pending live work rather than leaving a stale
+  cursor or action state.
+
 ## 0.10.5 — 2026-10-22
 
 - Rebuilt the hosted team review page as a compact UIDIT workspace with Review, Design, Runtime, and Project panels. Reviewers can inspect the HTML snapshot, pin feedback, reply, edit or delete their own comments, manage status and assignment, add reference photos, and view shared changes and activity.

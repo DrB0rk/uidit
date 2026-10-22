@@ -40,8 +40,9 @@ function clampDrawerWidth(width) {
 }
 
 export default function Dashboard() {
-  const { config, session, status: live, loading, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, actions } = useSession();
+  const { config, session, status: live, loading, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, browserActivity, executorClient, setBrowserExecutorHandler, actions } = useSession();
   const frameRef = useRef(null);
+  const executorRef = useRef({ bridgeNonce: null, leaseToken: null, generation: null, actionId: null, heartbeat: null, standbyTimer: null });
   const replayWaiters = useRef(new Map());
   const undoStack = useRef([]);
   const undoPending = useRef(false);
@@ -107,9 +108,101 @@ export default function Dashboard() {
   const targetUrl = config?.targetUrl ?? null;
   const previewOrigin = useMemo(() => { try { return new URL(config?.previewUrl).origin; } catch { return ''; } }, [config?.previewUrl]);
 
+  const executorRequest = useCallback(async (route, body) => {
+    const response = await fetch(route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error?.message || 'The browser executor request was rejected.');
+    return payload;
+  }, []);
+
+  const releaseExecutor = useCallback(() => {
+    const executor = executorRef.current;
+    if (executor.heartbeat) clearInterval(executor.heartbeat);
+    if (executor.standbyTimer) clearTimeout(executor.standbyTimer);
+    executor.heartbeat = null;
+    executor.standbyTimer = null;
+    if (executor.clientId && executor.leaseToken && executor.generation != null && executor.bridgeNonce) {
+      executorRequest('/api/browser/executor/release', { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce }).catch(() => {});
+    }
+    executorRef.current = { bridgeNonce: null, leaseToken: null, generation: null, actionId: null, heartbeat: null, standbyTimer: null };
+  }, [executorRequest]);
+
   const toOverlay = useCallback((message) => {
     if (previewOrigin) frameRef.current?.contentWindow?.postMessage({ source: 'uidit-dashboard', ...message }, previewOrigin);
   }, [previewOrigin]);
+
+  const claimExecutor = useCallback(async (navigation = null) => {
+    if (!executorClient?.clientId || !previewOrigin || !frameRef.current?.contentWindow) return;
+    const existing = executorRef.current;
+    if (existing.clientId === executorClient.clientId && existing.leaseToken) {
+      if (navigation?.actionId && navigation?.navigationToken && typeof navigation.currentPath === 'string') {
+        const nextBridgeNonce = crypto.randomUUID();
+        executorRequest(`/api/browser/actions/${encodeURIComponent(navigation.actionId)}/navigation-ready`, {
+          clientId: existing.clientId, leaseToken: existing.leaseToken, generation: existing.generation,
+          previousBridgeNonce: existing.bridgeNonce, newBridgeNonce: nextBridgeNonce,
+          navigationToken: navigation.navigationToken, currentPath: navigation.currentPath,
+        }).then(() => {
+          if (executorRef.current === existing) existing.bridgeNonce = nextBridgeNonce;
+          toOverlay({ type: 'browser-action-navigation-complete', actionId: navigation.actionId });
+        }).catch(() => {});
+      }
+      return;
+    }
+    releaseExecutor();
+    const bridgeNonce = crypto.randomUUID();
+    try {
+      const result = await executorRequest('/api/browser/executor/ready', { clientId: executorClient.clientId, bridgeNonce, previewOrigin });
+      if (result.status === 'standby') {
+        executorRef.current.standbyTimer = setTimeout(() => claimExecutor(), Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 5000);
+        return;
+      }
+      if (result.status !== 'leased' || typeof result.leaseToken !== 'string' || !Number.isInteger(result.generation)) return;
+      const executor = { clientId: executorClient.clientId, bridgeNonce, leaseToken: result.leaseToken, generation: result.generation, actionId: null, heartbeat: null, standbyTimer: null };
+      const heartbeatMs = Number.isFinite(result.heartbeatMs) ? result.heartbeatMs : 5000;
+      executor.heartbeat = setInterval(() => {
+        executorRequest('/api/browser/executor/renew', { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce }).catch(() => releaseExecutor());
+      }, heartbeatMs);
+      executorRef.current = executor;
+      if (navigation?.actionId && navigation?.navigationToken && typeof navigation.currentPath === 'string') claimExecutor(navigation);
+    } catch {
+      // Standby and unavailable states are represented by the server activity feed.
+    }
+  }, [executorClient?.clientId, executorRequest, previewOrigin, releaseExecutor, toOverlay]);
+
+  useEffect(() => () => releaseExecutor(), [releaseExecutor]);
+
+  useEffect(() => {
+    if (executorClient?.clientId && previewOrigin && frameRef.current?.contentWindow) claimExecutor();
+  }, [claimExecutor, executorClient?.clientId, previewOrigin]);
+
+  useEffect(() => setBrowserExecutorHandler(({ kind, payload }) => {
+    if (kind === 'leased' && executorClient?.clientId && typeof payload?.leaseToken === 'string' && Number.isInteger(payload.generation) && typeof payload.bridgeNonce === 'string') {
+      const previous = executorRef.current;
+      if (previous.heartbeat) clearInterval(previous.heartbeat);
+      if (previous.standbyTimer) clearTimeout(previous.standbyTimer);
+      const executor = { clientId: executorClient.clientId, leaseToken: payload.leaseToken, generation: payload.generation, bridgeNonce: payload.bridgeNonce, actionId: null, heartbeat: null, standbyTimer: null };
+      executor.heartbeat = setInterval(() => {
+        executorRequest('/api/browser/executor/renew', { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce }).catch(() => releaseExecutor());
+      }, Number.isFinite(payload.heartbeatMs) ? payload.heartbeatMs : 5000);
+      executorRef.current = executor;
+      return;
+    }
+    const executor = executorRef.current;
+    if (kind === 'finished' && payload?.actionId === executor.actionId && payload.generation === executor.generation && payload.bridgeNonce === executor.bridgeNonce) {
+      toOverlay({ type: 'browser-action-complete', actionId: payload.actionId, generation: payload.generation, bridgeNonce: payload.bridgeNonce });
+      executor.actionId = null;
+      return;
+    }
+    if (!payload || !executor.leaseToken || payload.generation !== executor.generation || payload.bridgeNonce !== executor.bridgeNonce) return;
+    if (kind === 'command' && typeof payload.actionId === 'string' && payload.command && typeof payload.command.type === 'string') {
+      executor.actionId = payload.actionId;
+      toOverlay({ type: 'browser-action-prepare', actionId: payload.actionId, generation: payload.generation, bridgeNonce: payload.bridgeNonce, command: payload.command });
+    }
+    if (kind === 'cancel' && payload.actionId === executor.actionId) {
+      toOverlay({ type: 'browser-action-cancel', actionId: payload.actionId, generation: payload.generation, bridgeNonce: payload.bridgeNonce, code: payload.code });
+      executor.actionId = null;
+    }
+  }), [executorClient?.clientId, executorRequest, releaseExecutor, setBrowserExecutorHandler, toOverlay]);
 
   const showWorkspace = useCallback((nextTab = 'feedback') => {
     setTab(TAB_GROUP[nextTab] ?? 'review');
@@ -226,6 +319,47 @@ export default function Dashboard() {
       if (ev.source !== frameRef.current?.contentWindow || ev.origin !== previewOrigin) return;
       const msg = ev.data;
       if (!msg || msg.source !== 'uidit-overlay') return;
+      if (msg.type === 'browser-executor-preview-ready') {
+        claimExecutor(msg.navigation && typeof msg.navigation === 'object' ? msg.navigation : null);
+        return;
+      }
+      const executor = executorRef.current;
+      const matchesExecutorAction = typeof msg.actionId === 'string' && msg.actionId === executor.actionId && msg.generation === executor.generation && msg.bridgeNonce === executor.bridgeNonce;
+      if (msg.type === 'browser-action-prepared' && matchesExecutorAction) {
+        executorRequest(`/api/browser/actions/${encodeURIComponent(msg.actionId)}/prepared`, {
+          clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce,
+          bounds: msg.bounds && Number.isFinite(msg.bounds.x) && Number.isFinite(msg.bounds.y) && Number.isFinite(msg.bounds.width) && Number.isFinite(msg.bounds.height) ? msg.bounds : null,
+          visibility: ['onscreen', 'partial', 'offscreen'].includes(msg.visibility) ? msg.visibility : 'offscreen',
+        }).then((prepared) => executorRequest(`/api/browser/actions/${encodeURIComponent(msg.actionId)}/execute`, {
+          clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce, prepareToken: prepared.prepareToken,
+        })).then((authorized) => {
+          if (executorRef.current.actionId !== msg.actionId) return;
+          toOverlay({ type: 'browser-action-execute', actionId: msg.actionId, generation: executor.generation, bridgeNonce: executor.bridgeNonce, executeToken: authorized.executeToken, navigationToken: authorized.navigationToken });
+        }).catch(() => {
+          toOverlay({ type: 'browser-action-cancel', actionId: msg.actionId, generation: executor.generation, bridgeNonce: executor.bridgeNonce, code: 'action_failed' });
+          if (executorRef.current.actionId === msg.actionId) executorRef.current.actionId = null;
+        });
+        return;
+      }
+      if (msg.type === 'browser-action-result' && matchesExecutorAction && (msg.outcome === 'ok' || msg.outcome === 'error') && typeof msg.executeToken === 'string') {
+        const body = { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce, executeToken: msg.executeToken, outcome: msg.outcome };
+        if (msg.outcome === 'error' && typeof msg.errorCode === 'string') body.errorCode = msg.errorCode;
+        if (msg.outcome === 'ok' && typeof msg.screenshot === 'string') body.screenshot = msg.screenshot;
+        executorRequest(`/api/browser/actions/${encodeURIComponent(msg.actionId)}/result`, body).catch(() => {}).finally(() => {
+          toOverlay({ type: 'browser-action-complete', actionId: msg.actionId, generation: executor.generation, bridgeNonce: executor.bridgeNonce });
+          if (executorRef.current.actionId === msg.actionId) executorRef.current.actionId = null;
+        });
+        return;
+      }
+      if (msg.type === 'browser-action-navigation-started' && matchesExecutorAction && typeof msg.executeToken === 'string' && typeof msg.navigationToken === 'string') {
+        executorRequest(`/api/browser/actions/${encodeURIComponent(msg.actionId)}/navigation-started`, { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce, executeToken: msg.executeToken, navigationToken: msg.navigationToken }).catch(() => {});
+        return;
+      }
+      if (msg.type === 'browser-action-cancel-ack' && matchesExecutorAction) {
+        executorRequest(`/api/browser/actions/${encodeURIComponent(msg.actionId)}/cancel-ack`, { clientId: executor.clientId, leaseToken: executor.leaseToken, generation: executor.generation, bridgeNonce: executor.bridgeNonce, code: msg.code }).catch(() => {});
+        if (executorRef.current.actionId === msg.actionId) executorRef.current.actionId = null;
+        return;
+      }
       // Shortcuts pressed while the preview has focus arrive here through the overlay.
       if (msg.type === 'shortcut' && typeof msg.key === 'string') { runShortcut(msg.key); return; }
       if (msg.type === 'record-step' && msg.step && typeof msg.flowId === 'string') {
@@ -303,7 +437,7 @@ export default function Dashboard() {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [actions, bridgeApi, onStatus, previewOrigin, recordComment, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
+  }, [actions, bridgeApi, claimExecutor, executorRequest, onStatus, previewOrigin, recordComment, session, showWorkspace, syncOverlay, targetUrl, toOverlay]);
 
   useEffect(() => {
     if (!browserAction?.id) return;
@@ -461,7 +595,7 @@ export default function Dashboard() {
           {tab === 'review' && <Sidebar session={session} selectedId={selected?.id} anchorStatuses={anchorStatuses} onSelect={select} actions={reviewActions} onOverlay={toOverlay} onStatus={onStatus} page={targetUrl} collaboration={collaboration} tab={reviewTab} onTab={setReviewTab} />}
           {tab === 'design' && <DesignPanel selected={selected} onOverlay={toOverlay} onStatus={onStatus} onClearSelection={() => setSelected(null)} reference={reference} onReferenceChange={setReference} compareMode={compareMode} onCompareMode={setCompareMode} opacity={referenceOpacity} onOpacity={setReferenceOpacity} />}
           {tab === 'runtime' && <><WorkspaceSubnav label="Runtime" items={RUNTIME_TABS} selected={runtimeTab} onSelect={setRuntimeTab} /><div className="workspace-panel-slot">{runtimeTab === 'flows' ? <FlowsPanel session={session} actions={actions} onStatus={onStatus} onRecording={(flowId) => toOverlay({ type: 'recordMode', enabled: Boolean(flowId), flowId })} onReplay={replayFlow} replayState={replayState} /> : <><Toolbar config={config} onConnect={connect} onDiscover={discover} onReload={() => setReloadKey((key) => key + 1)} mode={mode} onMode={setMode} /><ServerPanel config={config} dev={dev} actions={actions} onStatus={onStatus} onPreviewService={previewService} browserContext={browserContext} browserDiagnostics={browserDiagnostics} /></>}</div></>}
-          {tab === 'project' && <><WorkspaceSubnav label="Project" items={PROJECT_TABS} selected={projectTab} onSelect={setProjectTab} /><div className="workspace-panel-slot">{projectTab === 'agents' ? <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} actions={actions} onStatus={onStatus} /> : <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}</div></>}
+          {tab === 'project' && <><WorkspaceSubnav label="Project" items={PROJECT_TABS} selected={projectTab} onSelect={setProjectTab} /><div className="workspace-panel-slot">{projectTab === 'agents' ? <AgentsPanel config={config} mcp={mcp} collaboration={collaboration} session={session} browserActivity={browserActivity} actions={actions} onStatus={onStatus} /> : <SettingsPanel config={config} actions={actions} onStatus={onStatus} onHide={hideControls} />}</div></>}
         </Suspense>
       </div>
       <footer className="workspace-foot"><span className={`status-dot ${['ready', 'attached'].includes(dev?.state) ? 'online' : ''}`} /><span>Server {dev?.state ?? 'idle'}</span><span className="spacer" /><span>{live}</span></footer>

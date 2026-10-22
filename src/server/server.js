@@ -295,6 +295,29 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
           const body = await readBody(req); const entries = (Array.isArray(body.entries) ? body.entries : []).slice(0, 30).map((item) => ({ kind: ['console','network','page','hmr'].includes(item.kind) ? item.kind : 'page', message: String(item.message ?? '').slice(0, 1000).replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]').replace(/([?&](?:token|key|secret|password)=)[^&\s]*/gi, '$1[redacted]'), url: typeof item.url === 'string' ? item.url.slice(0, 2000) : null, at: new Date().toISOString() }));
           hub.notifyBrowserDiagnostics(entries); return json(res, 200, { ok: true });
         }
+        if (route === '/api/browser/executor/ready' && req.method === 'POST') {
+          const outcome = hub.executorReady(await readBody(req));
+          return json(res, outcome.status, outcome.body);
+        }
+        if (route === '/api/browser/executor/renew' && req.method === 'POST') {
+          const outcome = hub.executorRenew(await readBody(req));
+          return json(res, outcome.status, outcome.body);
+        }
+        if (route === '/api/browser/executor/release' && req.method === 'POST') {
+          const outcome = hub.executorRelease(await readBody(req));
+          return json(res, outcome.status, outcome.body);
+        }
+        const browserAction = route.match(/^\/api\/browser\/actions\/([0-9a-f-]{36})\/(prepared|execute|result|navigation-started|navigation-ready|cancel-ack)$/i);
+        if (browserAction && req.method === 'POST') {
+          const body = await readBody(req);
+          const outcome = browserAction[2] === 'prepared' ? hub.prepared(browserAction[1], body)
+            : browserAction[2] === 'execute' ? hub.execute(browserAction[1], body)
+              : browserAction[2] === 'navigation-started' ? hub.navigationStarted(browserAction[1], body)
+                : browserAction[2] === 'navigation-ready' ? hub.navigationReady(browserAction[1], body)
+                  : browserAction[2] === 'cancel-ack' ? hub.cancelAck(browserAction[1], body)
+                    : hub.result(browserAction[1], body);
+          return json(res, outcome.status, outcome.body);
+        }
         if (route === '/api/browser/action-result' && req.method === 'POST') {
           if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Live browser inspection is disabled in Settings' });
           const body = await readBody(req); let result = body.result;
@@ -419,8 +442,8 @@ export function createServer({ cwd = process.cwd(), hub = createHub(), port = 77
         if (!store.readConfig(cwd)?.ui?.allowBrowserInspection) return json(res, 403, { error: 'Enable live browser inspection before capturing task evidence' });
         const task = store.readSession(cwd).tasks.find((item) => item.id === decodeURIComponent(taskCapture[1]));
         if (!task) return json(res, 404, { error: 'task not found' });
-        const captured = await hub.requestBrowserAction({ type: 'screenshot' }, 20000);
-        const evidence = taskStore.addEvidence(cwd, task.id, { type: 'visual-diff', result: 'review_required', summary: `${taskCapture[2]} screenshot captured for reviewer comparison`, reference: captured.result?.artifact ?? null, metadata: { capture: taskCapture[2], viewport: hub.browserContext?.viewport ?? null, url: hub.browserContext?.url ?? null, git: projectContext(cwd).git } }, { actor: 'reviewer' });
+        const captured = await hub.requestInternalBrowserAction({ type: 'screenshot' }, 20000);
+        const evidence = taskStore.addEvidence(cwd, task.id, { type: 'visual-diff', result: 'review_required', summary: `${taskCapture[2]} screenshot captured for reviewer comparison`, reference: captured.result?.path ?? captured.result?.artifact ?? null, metadata: { capture: taskCapture[2], viewport: hub.browserContext?.viewport ?? null, url: hub.browserContext?.url ?? null, git: projectContext(cwd).git } }, { actor: 'reviewer' });
         hub.notify(); return json(res, 201, { evidence, session: store.readSession(cwd) });
       }
       const taskEvidence = route.match(/^\/api\/tasks\/([^/]+)\/evidence$/);

@@ -30,6 +30,9 @@
   let diagnosticRestore = null;
   let componentStateRestore = null;
   let proposalRestore = null;
+  let agentAction = null;
+  let agentVisual = null;
+  let agentVisualFrame = 0;
 
   // UIDIT's controls live in a separate-origin iframe; only accept its tiny,
   // schema-checked message set from the exact embedded window.
@@ -111,6 +114,8 @@
   if (!floating) floating = clampFloating(24, innerHeight - BUTTON - 24);
   place();
   window.addEventListener('resize', () => { floating = clampFloating(floating.x, floating.y); place(); });
+  window.addEventListener('resize', scheduleAgentVisual, { passive: true });
+  window.addEventListener('scroll', scheduleAgentVisual, { passive: true, capture: true });
 
   const post = (type, payload = {}) => window.parent.postMessage({ source: 'uidit-overlay', type, ...payload }, parentOrigin);
 
@@ -139,6 +144,132 @@
     try { const url = new URL(raw); for (const key of [...url.searchParams.keys()]) if (/^(?:r|_t|t|timestamp|cacheBust|cache_bust|utm_.+|fbclid|gclid)$/i.test(key)) url.searchParams.delete(key); url.searchParams.sort(); return `${url.origin}${url.pathname}${url.search}`; }
     catch { return String(raw ?? ''); }
   };
+
+  const agentErrorCode = (error) => {
+    const text = String(error?.message ?? '').toLowerCase();
+    if (text.includes('not found') || text.includes('not connected')) return 'target_missing';
+    if (text.includes('sensitive')) return 'sensitive_target';
+    if (text.includes('navigation')) return 'invalid_navigation';
+    return 'action_failed';
+  };
+
+  function clearAgentVisual() {
+    cancelAnimationFrame(agentVisualFrame);
+    agentVisualFrame = 0;
+    agentVisual?.remove();
+    agentVisual = null;
+  }
+
+  function measureAgentVisual() {
+    agentVisualFrame = 0;
+    if (!agentVisual || !agentAction) return;
+    const target = agentAction.element;
+    const viewportAction = ['navigate', 'screenshot'].includes(agentAction.command.type);
+    if (!viewportAction && (!target || !target.isConnected)) { clearAgentVisual(); return; }
+    const bounds = viewportAction ? { left: 12, top: 12, width: Math.max(1, innerWidth - 24), height: Math.max(1, innerHeight - 24) } : target.getBoundingClientRect();
+    const offscreen = bounds.right < 0 || bounds.bottom < 0 || bounds.left > innerWidth || bounds.top > innerHeight;
+    const left = Math.max(8, Math.min(bounds.left, innerWidth - 28));
+    const top = Math.max(8, Math.min(bounds.top, innerHeight - 28));
+    agentVisual.style.setProperty('--agent-left', `${Math.round(left)}px`);
+    agentVisual.style.setProperty('--agent-top', `${Math.round(top)}px`);
+    agentVisual.style.setProperty('--agent-width', `${Math.max(2, Math.round(bounds.width))}px`);
+    agentVisual.style.setProperty('--agent-height', `${Math.max(2, Math.round(bounds.height))}px`);
+    if (offscreen) agentVisual.dataset.offscreen = bounds.left < 0 ? 'left' : bounds.left > innerWidth ? 'right' : bounds.top < 0 ? 'up' : 'down';
+    else agentVisual.removeAttribute('data-offscreen');
+  }
+
+  function scheduleAgentVisual() {
+    if (!agentVisualFrame) agentVisualFrame = requestAnimationFrame(measureAgentVisual);
+  }
+
+  function showAgentVisual(command, element) {
+    clearAgentVisual();
+    const visual = document.createElement('div');
+    visual.className = 'uidit-agent-visual';
+    visual.dataset.uiditUi = '1';
+    visual.setAttribute('aria-hidden', 'true');
+    visual.innerHTML = '<span class="uidit-agent-target"></span><span class="uidit-agent-cursor"></span><span class="uidit-agent-label"></span><span class="uidit-agent-direction"></span>';
+    visual.querySelector('.uidit-agent-label').textContent = `${command.type} in progress`;
+    document.documentElement.append(visual);
+    agentVisual = visual;
+    scheduleAgentVisual();
+  }
+
+  function actionTarget(command) {
+    if (['navigate', 'screenshot'].includes(command.type)) return null;
+    if (typeof command.selector !== 'string' || command.selector.length > 1000) return null;
+    const element = document.querySelector(command.selector);
+    return element && !element.closest?.('[data-uidit-ui]') ? element : null;
+  }
+
+  function actionBounds(element, command) {
+    if (['navigate', 'screenshot'].includes(command.type)) return null;
+    if (!element?.isConnected) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(0, Math.round(rect.width)), height: Math.max(0, Math.round(rect.height)) };
+  }
+
+  function actionVisibility(bounds, command) {
+    if (['navigate', 'screenshot'].includes(command.type)) return 'onscreen';
+    if (!bounds || bounds.width < 1 || bounds.height < 1) return 'offscreen';
+    if (bounds.x < 0 || bounds.y < 0 || bounds.x + bounds.width > innerWidth || bounds.y + bounds.height > innerHeight) return 'partial';
+    return 'onscreen';
+  }
+
+  function prepareAgentAction(msg) {
+    const { actionId, generation, bridgeNonce, command } = msg;
+    if (typeof actionId !== 'string' || !Number.isInteger(generation) || typeof bridgeNonce !== 'string' || !command || typeof command.type !== 'string') return;
+    const element = actionTarget(command);
+    if (!['navigate', 'screenshot'].includes(command.type) && !element) {
+      post('browser-action-prepared', { actionId, generation, bridgeNonce, bounds: null, visibility: 'offscreen', errorCode: 'target_missing' });
+      return;
+    }
+    agentAction = { actionId, generation, bridgeNonce, command, element };
+    showAgentVisual(command, element);
+    const bounds = actionBounds(element, command);
+    post('browser-action-prepared', { actionId, generation, bridgeNonce, bounds, visibility: actionVisibility(bounds, command) });
+  }
+
+  async function executeAgentAction(msg) {
+    if (!agentAction || msg.actionId !== agentAction.actionId || msg.generation !== agentAction.generation || msg.bridgeNonce !== agentAction.bridgeNonce || typeof msg.executeToken !== 'string') return;
+    const { actionId, generation, bridgeNonce, command } = agentAction;
+    try {
+      if (command.type === 'navigate') {
+        if (typeof command.path !== 'string' || !command.path.startsWith('/') || command.path.startsWith('//')) throw new Error('Invalid navigation');
+        sessionStorage.setItem('uidit-agent-navigation', JSON.stringify({ actionId, navigationToken: msg.navigationToken, path: new URL(command.path, location.href).pathname }));
+        post('browser-action-navigation-started', { actionId, generation, bridgeNonce, executeToken: msg.executeToken, navigationToken: msg.navigationToken });
+        location.assign(new URL(command.path.startsWith('/proxy/') ? command.path : `/proxy${command.path}`, location.origin));
+        return;
+      }
+      const element = agentAction.element;
+      if (command.type === 'screenshot') {
+        const screenshot = await captureStepScreenshot();
+        if (!screenshot) throw new Error('Screenshot failed');
+        post('browser-action-result', { actionId, generation, bridgeNonce, executeToken: msg.executeToken, outcome: 'ok', screenshot });
+      } else {
+        if (!element?.isConnected) throw new Error('Target not found');
+        if (command.type === 'click') element.click();
+        else if (command.type === 'focus') element.focus();
+        else if (command.type === 'hover') element.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+        else if (command.type === 'scroll') { element.scrollIntoView({ block: 'center', behavior: 'instant' }); scheduleAgentVisual(); }
+        else if (command.type === 'fill') {
+          if (isSensitive(element)) throw new Error('Sensitive target');
+          if (!/^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || typeof command.value !== 'string') throw new Error('Target not found');
+          const proto = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : element.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+          if (setter) setter.call(element, command.value); else element.value = command.value;
+          element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (command.type === 'keypress') {
+          const key = ['Enter', 'Escape', 'Tab', 'ArrowDown', 'ArrowUp', ' '].includes(command.key) ? command.key : null;
+          if (!key) throw new Error('Invalid key');
+          element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); element.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+        } else throw new Error('Unsupported action');
+        post('browser-action-result', { actionId, generation, bridgeNonce, executeToken: msg.executeToken, outcome: 'ok' });
+      }
+    } catch (error) {
+      post('browser-action-result', { actionId, generation, bridgeNonce, executeToken: msg.executeToken, outcome: 'error', errorCode: agentErrorCode(error) });
+    }
+  }
 
   function uniqueSelector(el) {
     if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) {
@@ -1075,6 +1206,28 @@
       // state, which carries its own `source` field.
       controls.contentWindow?.postMessage({ ...msg, source: 'uidit-preview', type: 'state' }, controlOrigin); return;
     }
+    if (msg.type === 'browser-action-prepare') { prepareAgentAction(msg); return; }
+    if (msg.type === 'browser-action-execute') { executeAgentAction(msg); return; }
+    if (msg.type === 'browser-action-cancel') {
+      if (agentAction && msg.actionId === agentAction.actionId && msg.generation === agentAction.generation && msg.bridgeNonce === agentAction.bridgeNonce) {
+        clearAgentVisual(); agentAction = null;
+        post('browser-action-cancel-ack', { actionId: msg.actionId, generation: msg.generation, bridgeNonce: msg.bridgeNonce, code: typeof msg.code === 'string' ? msg.code : 'action_failed' });
+      }
+      return;
+    }
+    if (msg.type === 'browser-action-navigation-complete' && typeof msg.actionId === 'string') {
+      try {
+        const carried = JSON.parse(sessionStorage.getItem('uidit-agent-navigation') || 'null');
+        if (carried?.actionId === msg.actionId) sessionStorage.removeItem('uidit-agent-navigation');
+      } catch {}
+      clearAgentVisual(); agentAction = null;
+      return;
+    }
+    if (msg.type === 'browser-action-complete' && agentAction && msg.actionId === agentAction.actionId && msg.generation === agentAction.generation && msg.bridgeNonce === agentAction.bridgeNonce) {
+      clearAgentVisual(); agentAction = null;
+      return;
+    }
+    if (msg.type === 'browser-action-clear') { clearAgentVisual(); agentAction = null; return; }
     if (msg.type === 'browserAction') { runBrowserAction(msg.id, msg.action); return; }
     if (msg.type === 'componentStatePreview') {
       if (msg.state === 'reset') { componentStateRestore?.(); componentStateRestore = null; post('component-state', { state: 'reset', ok: true }); return; }
@@ -1280,4 +1433,12 @@
   }
 
   post('ready', { url: realPage(), title: document.title });
+  let carriedNavigation = null;
+  try {
+    const candidate = JSON.parse(sessionStorage.getItem('uidit-agent-navigation') || 'null');
+    if (candidate && typeof candidate.actionId === 'string' && typeof candidate.navigationToken === 'string') carriedNavigation = candidate;
+  } catch {}
+  post('browser-executor-preview-ready', {
+    navigation: carriedNavigation ? { actionId: carriedNavigation.actionId, navigationToken: carriedNavigation.navigationToken, currentPath: `${location.pathname.replace(/^\/proxy/, '') || '/'}${location.search}` } : null,
+  });
 })();

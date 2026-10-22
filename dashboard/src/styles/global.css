@@ -660,6 +660,13 @@ kbd {
 .runtime-url,.runtime-command { margin-top: 10px; color: var(--accent-text); font: var(--text-xs) var(--mono); overflow-wrap: anywhere; }
 .runtime-command { color: var(--fg-muted); }
 .runtime-error { margin-top: 10px; color: var(--danger-text); font-size: 11px; }
+.agent-browser-activity { display:grid; gap:6px; }
+.agent-browser-activity .runtime-muted { margin:0; line-height:1.45; }
+.agent-browser-activity ol { display:grid; gap:6px; margin:4px 0 0; padding:0; list-style:none; }
+.agent-browser-activity li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 9px; padding-top:6px; border-top:1px solid var(--border); color:var(--fg-muted); font-size:11px; }
+.agent-browser-activity li span { overflow:hidden; color:var(--fg); text-overflow:ellipsis; white-space:nowrap; }
+.agent-browser-activity li time { color:var(--fg-subtle); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.agent-browser-activity li small { grid-column:1/-1; color:var(--danger-text); font-size:10px; line-height:1.35; }
 .runtime-actions { margin-top: 12px; }
 .runtime-label { display: block; margin: 15px 0 6px; color: var(--fg-muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .runtime-input { width: 100%; min-height: 36px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--fg); background: var(--raised); font: var(--text-base) var(--mono); }

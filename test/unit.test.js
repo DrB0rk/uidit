@@ -19,6 +19,7 @@ import { describeReviewActions, runReviewAction } from '../src/actions/review.js
 import { assertAgentWritesAllowed } from '../src/server/agent-policy.js';
 import { startMcpServer } from '../src/server/mcp/server.js';
 import { CollaborationManager } from '../src/server/collaboration.js';
+import { createHub } from '../src/server/realtime.js';
 
 function tmpProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uidit-unit-'));
@@ -622,4 +623,105 @@ test('element and edit fields are bounded at the shared boundary', () => {
   // The values the surfaces actually send still pass.
   store.addEdit(cwd, { elementId: element.id, kind: 'style', property: 'background-color', before: 'x'.repeat(2000), after: 'red' });
   assert.equal(store.readSession(cwd).edits.length, 1);
+});
+
+test('browser executor lifecycle is leased, sanitized, and settles one action exactly once', async () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  const config = { ui: { allowBrowserInspection: true }, mcp: { allowBrowserControl: true }, targetUrl: 'http://127.0.0.1:4602' };
+  const hub = createHub({ cwd, config: () => config });
+  const events = [];
+  const res = { write(chunk) { events.push(String(chunk)); }, end() {} };
+  const remove = hub.add(res);
+  const readEvents = (name) => events.filter((chunk) => chunk.includes(`event: ${name}\n`)).map((chunk) => JSON.parse(chunk.match(/data: (.+)\n/)[1]));
+  const clientId = readEvents('executor-client')[0].clientId;
+  const bridgeNonce = 'b'.repeat(64);
+  hub.notifyBrowserContext({ nodes: [{ selector: '#pay', tag: 'BUTTON', role: 'button', name: 'Pay now', text: 'private page text' }] });
+  const ready = hub.executorReady({ clientId, bridgeNonce, previewOrigin: 'http://127.0.0.1:4602' });
+  assert.equal(ready.status, 200);
+  assert.equal(ready.body.status, 'leased');
+
+  const secret = 'UIDIT_PRIVATE_FILL_8bfb6f52';
+  const action = hub.requestBrowserAction({ type: 'fill', selector: '#pay', value: secret });
+  const command = readEvents('browser-executor-command').at(-1);
+  assert.equal(command.command.value, secret, 'only the leased private command receives the fill value');
+  const queued = readEvents('agent-browser-activity').at(-1);
+  assert.deepEqual(Object.keys(queued.active).sort(), ['queuedAt', 'state', 'target', 'type']);
+  assert.equal(queued.active.state, 'queued');
+  assert.doesNotMatch(JSON.stringify(queued), /UIDIT_PRIVATE_FILL|#pay|Pay now|private page text|actionId/i);
+
+  const wrongNonce = hub.prepared(command.actionId, { clientId, leaseToken: ready.body.leaseToken, generation: ready.body.generation, bridgeNonce: 'x'.repeat(64) });
+  assert.equal(wrongNonce.status, 403);
+  assert.deepEqual(wrongNonce.body, { error: { code: 'executor_mismatch', message: 'This dashboard does not own the browser executor lease.' } });
+  const prepared = hub.prepared(command.actionId, { clientId, leaseToken: ready.body.leaseToken, generation: ready.body.generation, bridgeNonce });
+  assert.equal(prepared.status, 200);
+  const executed = hub.execute(command.actionId, { clientId, leaseToken: ready.body.leaseToken, generation: ready.body.generation, bridgeNonce, prepareToken: prepared.body.prepareToken });
+  assert.equal(executed.status, 200);
+  const running = readEvents('agent-browser-activity').at(-1);
+  assert.equal(running.active.state, 'running');
+  assert.doesNotMatch(JSON.stringify(running), /UIDIT_PRIVATE_FILL|#pay|Pay now|private page text|actionId/i);
+  const result = hub.result(command.actionId, { clientId, leaseToken: ready.body.leaseToken, generation: ready.body.generation, bridgeNonce, executeToken: executed.body.executeToken, outcome: 'ok' });
+  assert.deepEqual(result, { status: 200, body: { status: 'accepted' } });
+  assert.deepEqual(await action, { result: {} });
+  const completed = readEvents('agent-browser-activity').at(-1);
+  assert.equal(completed.active, null);
+  assert.equal(completed.recent[0].state, 'completed');
+  assert.doesNotMatch(JSON.stringify(completed), /UIDIT_PRIVATE_FILL|#pay|Pay now|private page text|actionId/i);
+  const duplicate = hub.result(command.actionId, { clientId, leaseToken: ready.body.leaseToken, generation: ready.body.generation, bridgeNonce, executeToken: executed.body.executeToken, outcome: 'ok' });
+  assert.equal(duplicate.status, 404, 'a late result cannot revive a terminal action');
+  remove();
+  hub.close();
+});
+
+test('executor loss fails an in-flight action and clears its public cursor state', async () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  const hub = createHub({ cwd, config: () => ({ ui: { allowBrowserInspection: true }, mcp: { allowBrowserControl: true }, targetUrl: 'http://127.0.0.1:4602' }) });
+  const writes = [];
+  const remove = hub.add({ write(chunk) { writes.push(String(chunk)); }, end() {} });
+  const events = (name) => writes.filter((chunk) => chunk.includes(`event: ${name}\n`)).map((chunk) => JSON.parse(chunk.match(/data: (.+)\n/)[1]));
+  const clientId = events('executor-client')[0].clientId;
+  const bridgeNonce = 'c'.repeat(64);
+  hub.notifyBrowserContext({ nodes: [{ selector: '#pay', tag: 'BUTTON', role: 'button' }] });
+  const leased = hub.executorReady({ clientId, bridgeNonce, previewOrigin: 'http://127.0.0.1:4602' });
+  const action = hub.requestBrowserAction({ type: 'click', selector: '#pay' });
+  const command = events('browser-executor-command').at(-1);
+  const prepared = hub.prepared(command.actionId, { clientId, leaseToken: leased.body.leaseToken, generation: leased.body.generation, bridgeNonce });
+  const executed = hub.execute(command.actionId, { clientId, leaseToken: leased.body.leaseToken, generation: leased.body.generation, bridgeNonce, prepareToken: prepared.body.prepareToken });
+  assert.equal(executed.status, 200);
+  const released = hub.executorRelease({ clientId, leaseToken: leased.body.leaseToken, generation: leased.body.generation, bridgeNonce });
+  assert.deepEqual(released, { status: 200, body: { status: 'released' } });
+  await assert.rejects(action, (error) => error?.code === 'executor_disconnected');
+  const terminal = events('agent-browser-activity').at(-1);
+  assert.equal(terminal.active, null);
+  assert.equal(terminal.recent[0].state, 'failed');
+  assert.equal(terminal.recent[0].error.code, 'executor_disconnected');
+  remove();
+  hub.close();
+});
+
+test('internal captures need a leased executor, remain private, and never enter agent activity', async () => {
+  const cwd = tmpProject();
+  store.init(cwd);
+  const hub = createHub({ cwd, config: () => ({ ui: { allowBrowserInspection: true }, mcp: { allowBrowserControl: true }, targetUrl: 'http://127.0.0.1:4602' }) });
+  const rawWrites = [], executorWrites = [];
+  const rawRemove = hub.add({ write(chunk) { rawWrites.push(String(chunk)); }, end() {} });
+  const eventData = (writes, name) => writes.filter((chunk) => chunk.includes(`event: ${name}\n`)).map((chunk) => JSON.parse(chunk.match(/data: (.+)\n/)[1]));
+  const capture = hub.requestInternalBrowserAction({ type: 'screenshot' });
+  assert.equal(eventData(rawWrites, 'browser-action').length, 0, 'an SSE-only client cannot execute an internal capture');
+  assert.equal(eventData(rawWrites, 'agent-browser-activity').at(-1).active, null, 'internal captures do not create agent activity');
+
+  const executorRemove = hub.add({ write(chunk) { executorWrites.push(String(chunk)); }, end() {} });
+  const clientId = eventData(executorWrites, 'executor-client')[0].clientId;
+  const lease = hub.executorReady({ clientId, bridgeNonce: 'd'.repeat(64), previewOrigin: 'http://127.0.0.1:4602' });
+  assert.equal(lease.status, 200);
+  const command = eventData(executorWrites, 'browser-action').at(-1);
+  assert.equal(command.action.type, 'screenshot');
+  assert.equal(eventData(rawWrites, 'browser-action').length, 0, 'the raw SSE-only client never receives the capture command');
+  assert.equal(eventData(executorWrites, 'agent-browser-activity').at(-1).active, null, 'the capture stays out of the activity feed for all clients');
+  assert.equal(hub.resolveBrowserAction(command.id, { ok: true, result: { artifact: '.uidit/artifacts/reviewer.jpg' } }), true);
+  assert.deepEqual(await capture, { ok: true, result: { artifact: '.uidit/artifacts/reviewer.jpg' } });
+  rawRemove();
+  executorRemove();
+  hub.close();
 });

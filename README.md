@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.5">Latest release: v0.10.5</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.6">Latest release: v0.10.6</a> · Node.js 22+</p>
 
 ---
 
@@ -32,7 +32,7 @@ exiting. From a clone instead: `npm install -g .`
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.5/drb0rk-uidit-0.10.5.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.6/drb0rk-uidit-0.10.6.tgz
 ```
 
 ## Use
@@ -194,9 +194,13 @@ approval records a request and never edits source files.
 **Live browser context** — enable **Live browser inspection** in Agents settings
 to share a bounded, redacted DOM snapshot and browser diagnostics with MCP.
 Browser control is a separate permission and only allows a limited set of
-actions against observed elements. Disable inspection to stop sharing page
-context. The audit tool reports measured DOM checks separately from manual
-review candidates; it does not claim full WCAG conformance.
+actions against observed elements. While an allowed action runs, the local
+preview shows a non-interactive agent cursor and target outline, and **Agents →
+Agent browser activity** shows a bounded, sanitized status. The view never
+includes typed values, selectors, page text, URLs, or browser exception output.
+Disable inspection to stop sharing page context and terminate pending browser
+work. The audit tool reports measured DOM checks separately from manual review
+candidates; it does not claim full WCAG conformance.
 
 **Durable anchors and source hints** — comments preserve their original element
 anchor when markup changes. UIDIT may suggest a replacement, but ambiguous

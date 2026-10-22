@@ -30,7 +30,10 @@ export function useSession() {
   const [browserContext, setBrowserContext] = useState(null);
   const [browserDiagnostics, setBrowserDiagnostics] = useState([]);
   const [browserAction, setBrowserAction] = useState(null);
+  const [browserActivity, setBrowserActivity] = useState({ active: null, recent: [] });
+  const [executorClient, setExecutorClient] = useState(null);
   const sourceRef = useRef(null);
+  const browserCommandHandler = useRef(null);
 
   const refresh = useCallback(async () => {
     const data = await req('/api/state');
@@ -67,6 +70,32 @@ export function useSession() {
     source.addEventListener('browser-context', (ev) => { if (!closed) setBrowserContext(JSON.parse(ev.data)); });
     source.addEventListener('browser-diagnostics', (ev) => { if (!closed) setBrowserDiagnostics((items) => [...items, ...JSON.parse(ev.data)].slice(-250)); });
     source.addEventListener('browser-action', (ev) => { if (!closed) setBrowserAction(JSON.parse(ev.data)); });
+    source.addEventListener('executor-client', (ev) => {
+      if (closed) return;
+      const payload = JSON.parse(ev.data);
+      if (payload?.protocol === 1 && typeof payload.clientId === 'string') setExecutorClient({ clientId: payload.clientId });
+    });
+    source.addEventListener('agent-browser-activity', (ev) => {
+      if (closed) return;
+      const payload = JSON.parse(ev.data);
+      if (payload && Array.isArray(payload.recent) && ('active' in payload)) setBrowserActivity({ active: payload.active ?? null, recent: payload.recent });
+    });
+    source.addEventListener('browser-executor-command', (ev) => {
+      if (closed) return;
+      browserCommandHandler.current?.({ kind: 'command', payload: JSON.parse(ev.data) });
+    });
+    source.addEventListener('browser-executor-cancel', (ev) => {
+      if (closed) return;
+      browserCommandHandler.current?.({ kind: 'cancel', payload: JSON.parse(ev.data) });
+    });
+    source.addEventListener('browser-executor-leased', (ev) => {
+      if (closed) return;
+      browserCommandHandler.current?.({ kind: 'leased', payload: JSON.parse(ev.data) });
+    });
+    source.addEventListener('browser-executor-finished', (ev) => {
+      if (closed) return;
+      browserCommandHandler.current?.({ kind: 'finished', payload: JSON.parse(ev.data) });
+    });
     source.onerror = () => {
       if (!closed) {
         setLive(false);
@@ -131,5 +160,10 @@ export function useSession() {
     captureTaskSnapshot: (taskId, kind) => withSession(req(`/api/tasks/${encodeURIComponent(taskId)}/captures/${kind}`, 'POST', {})),
   };
 
-  return { config, session, status, loading, live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, refresh, actions };
+  const setBrowserExecutorHandler = useCallback((handler) => {
+    browserCommandHandler.current = typeof handler === 'function' ? handler : null;
+    return () => { if (browserCommandHandler.current === handler) browserCommandHandler.current = null; };
+  }, []);
+
+  return { config, session, status, loading, live, dev, mcp, collaboration, selection, browserContext, browserDiagnostics, browserAction, browserActivity, executorClient, setBrowserExecutorHandler, refresh, actions };
 }

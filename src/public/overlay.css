@@ -11,6 +11,23 @@ iframe[data-uidit-ui] {
 
 html.uidit-dragging,html.uidit-dragging body { overflow:clip!important; overscroll-behavior:none!important; }
 
+/* A non-interactive, local-only trace of the action currently authorized by the
+   dashboard. This never participates in page capture or hit testing. */
+.uidit-agent-visual { position:fixed; z-index:2147483645; inset:0; pointer-events:none; font:600 12px/1.2 Inter,ui-sans-serif,system-ui,sans-serif; }
+.uidit-agent-target { position:fixed; left:var(--agent-left); top:var(--agent-top); width:var(--agent-width); height:var(--agent-height); border:2px solid #7357e8; border-radius:5px; box-shadow:0 0 0 2px #ffffffcc; animation:uidit-agent-target-in .16s ease-out both; }
+.uidit-agent-cursor { position:fixed; left:calc(var(--agent-left) - 10px); top:calc(var(--agent-top) - 15px); width:19px; height:25px; border:2px solid #fff; border-radius:12px 12px 12px 2px; background:#7357e8; box-shadow:0 2px 8px #17152255; transform:rotate(-24deg); }
+.uidit-agent-label { position:fixed; left:var(--agent-left); top:calc(var(--agent-top) - 30px); max-width:190px; overflow:hidden; padding:4px 7px; border:1px solid #4a3aa2; border-radius:5px; color:#fff; background:#32266c; text-overflow:ellipsis; white-space:nowrap; box-shadow:0 2px 8px #17152244; }
+.uidit-agent-direction { display:none; }
+.uidit-agent-visual[data-offscreen] .uidit-agent-target { width:20px; height:20px; border-radius:50%; }
+.uidit-agent-visual[data-offscreen] .uidit-agent-cursor { display:none; }
+.uidit-agent-visual[data-offscreen] .uidit-agent-direction { display:block; position:fixed; left:calc(var(--agent-left) + 4px); top:calc(var(--agent-top) + 2px); width:0; height:0; border:6px solid transparent; }
+.uidit-agent-visual[data-offscreen="left"] .uidit-agent-direction { border-right-color:#7357e8; transform:translateX(-8px); }
+.uidit-agent-visual[data-offscreen="right"] .uidit-agent-direction { border-left-color:#7357e8; transform:translateX(8px); }
+.uidit-agent-visual[data-offscreen="up"] .uidit-agent-direction { border-bottom-color:#7357e8; transform:translateY(-8px); }
+.uidit-agent-visual[data-offscreen="down"] .uidit-agent-direction { border-top-color:#7357e8; transform:translateY(8px); }
+@keyframes uidit-agent-target-in { from { opacity:.25; transform:scale(.97); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { .uidit-agent-target { animation:none; } }
+
 /* Positioned by overlay.js from the reviewer's dragged position: a small square
    while idle so it covers no more of the page than the button itself, then
    widened to hold the panel. */

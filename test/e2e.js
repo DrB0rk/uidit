@@ -357,6 +357,24 @@ try {
   const client = new Client({ name: 'uidit-e2e-agent', version: '1.0.0' }, { capabilities: {} });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${DASH}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${readMcpToken(ROOT)}` } } }));
   const headingComment = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).comments.find((c) => c.text === 'Give the heading more breathing room.');
+  const agentComment = await client.callTool({ name: 'uidit_add_comment', arguments: { text: 'Agent review: verify delivery timing on this page.', page: `http://127.0.0.1:${FIXTURE_PORT}/` } });
+  assert.equal(Boolean(agentComment.isError), false, JSON.stringify(agentComment));
+  const agentCommentId = agentComment.structuredContent.comment.id;
+  await page.getByText('Agent review: verify delivery timing on this page.').waitFor();
+  let revision = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).revision;
+  const assigned = await client.callTool({ name: 'uidit_update_comment', arguments: { id: agentCommentId, assignee: 'e2e-agent', status: 'in_progress', expectedRevision: revision } });
+  assert.equal(Boolean(assigned.isError), false, JSON.stringify(assigned));
+  revision = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).revision;
+  const resolved = await client.callTool({ name: 'uidit_update_comment', arguments: { id: agentCommentId, resolved: true, expectedRevision: revision } });
+  assert.equal(Boolean(resolved.isError), false, JSON.stringify(resolved));
+  revision = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).revision;
+  const reopened = await client.callTool({ name: 'uidit_update_comment', arguments: { id: agentCommentId, resolved: false, expectedRevision: revision } });
+  assert.equal(Boolean(reopened.isError), false, JSON.stringify(reopened));
+  const staleRevision = await client.callTool({ name: 'uidit_update_comment', arguments: { id: agentCommentId, status: 'needs_info', expectedRevision: revision } });
+  assert.equal(staleRevision.isError, true, 'MCP rejects stale comment revisions without changing the record');
+  const persistedAgentComment = JSON.parse(fs.readFileSync(`${ROOT}/.uidit/session.json`, 'utf8')).comments.find((comment) => comment.id === agentCommentId);
+  assert.equal(persistedAgentComment.resolved, false);
+  assert.equal(persistedAgentComment.assignee, 'e2e-agent');
   const agentReply = await client.callTool({ name: 'uidit_reply_comment', arguments: { id: headingComment.id, text: 'I can adjust it. Is 24px appropriate?' } });
   assert.equal(Boolean(agentReply.isError), false, JSON.stringify(agentReply));
   const briefResult = await client.callTool({ name: 'uidit_get_agent_brief', arguments: { focus: 'breathing room', limit: 10 } });
@@ -421,8 +439,71 @@ try {
   assert.equal(blockedControl.isError, true, 'browser control has its own opt-in');
   const controlPermission = await fetch(`http://127.0.0.1:${DASH}/api/config`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: JSON.stringify({ mcp: { allowBrowserControl: true } }) });
   assert.equal(controlPermission.status, 200);
-  const controlled = await client.callTool({ name: 'uidit_browser_action', arguments: { type: 'hover', selector: '#pay' } });
+  // Hold exactly one real result request after the preview executes it. This
+  // observes the production running state without adding a test-only delay.
+  let releaseBrowserResult;
+  const browserResultHeld = new Promise((resolve) => { releaseBrowserResult = resolve; });
+  let heldResult = false;
+  await page.route('**/api/browser/actions/*/result', async (route) => {
+    if (!heldResult) { heldResult = true; await browserResultHeld; }
+    await route.continue();
+  });
+  const controlledPromise = client.callTool({ name: 'uidit_browser_action', arguments: { type: 'hover', selector: '#pay' } });
+  await frame.locator('.uidit-agent-visual').waitFor();
+  await frame.locator('.uidit-agent-target').waitFor();
+  const cursor = frame.locator('.uidit-agent-cursor');
+  assert.notEqual(await cursor.evaluate((element) => getComputedStyle(element).display), 'none', 'the synthetic agent cursor remains visible while the result is held');
+  await frame.locator('.uidit-agent-target').evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+  const payBox = await frame.locator('#pay').boundingBox();
+  const agentTargetBox = await frame.locator('.uidit-agent-target').boundingBox();
+  assert.ok(Math.abs(agentTargetBox.x - payBox.x) < 4 && Math.abs(agentTargetBox.y - payBox.y) < 4 && Math.abs(agentTargetBox.width - payBox.width) < 4 && Math.abs(agentTargetBox.height - payBox.height) < 4, `cursor outline follows the live target: agent=${JSON.stringify(agentTargetBox)} target=${JSON.stringify(payBox)}`);
+  assert.equal(await frame.locator('body').getAttribute('data-uidit-agent-hover'), 'mouse', 'the preview performed the hovered action before its terminal acknowledgement');
+  assert.equal(await frame.locator('.uidit-agent-visual').evaluate((element) => getComputedStyle(element).pointerEvents), 'none', 'the synthetic cursor cannot intercept ordinary user input');
+  releaseBrowserResult();
+  const controlled = await controlledPromise;
+  await page.unroute('**/api/browser/actions/*/result');
   assert.equal(Boolean(controlled.isError), false, JSON.stringify(controlled));
+  assert.deepEqual(controlled.structuredContent, { type: 'hover', status: 'completed' });
+  await frame.locator('.uidit-agent-visual').waitFor({ state: 'detached' });
+
+  const callBrowserAction = async (type, arguments_, check) => {
+    const actionResult = await client.callTool({ name: 'uidit_browser_action', arguments: { type, ...arguments_ } });
+    assert.equal(Boolean(actionResult.isError), false, JSON.stringify(actionResult));
+    assert.deepEqual(actionResult.structuredContent, { type, status: 'completed' });
+    if (check) await check();
+  };
+  const fillSecret = 'UIDIT_PRIVATE_FILL_e2e_93c5a8';
+  await callBrowserAction('focus', { selector: '#pay' }, async () => assert.equal(await frame.evaluate(() => document.activeElement?.id), 'pay'));
+  await callBrowserAction('fill', { selector: '#first', value: fillSecret }, async () => assert.equal(await frame.locator('#first').inputValue(), fillSecret));
+  await callBrowserAction('keypress', { selector: '#pay', key: 'Enter' }, async () => assert.equal(await frame.locator('body').getAttribute('data-uidit-agent-key'), 'Enter'));
+  const clicksBeforeAgentAction = Number(await frame.locator('body').getAttribute('data-uidit-agent-clicks') || 0);
+  await callBrowserAction('click', { selector: '#pay' }, async () => assert.equal(Number(await frame.locator('body').getAttribute('data-uidit-agent-clicks')), clicksBeforeAgentAction + 1));
+  await callBrowserAction('scroll', { selector: '#security' }, async () => assert.ok(await frame.evaluate(() => scrollY > 0), 'scroll action moves an offscreen fixture target into view'));
+  const externalNavigation = await client.callTool({ name: 'uidit_browser_action', arguments: { type: 'navigate', path: 'https://example.invalid/escape' } });
+  assert.equal(externalNavigation.isError, true, 'external navigation is rejected before it reaches the preview');
+  assert.equal(await frame.locator('.uidit-agent-visual').count(), 0, 'rejected navigation starts no cursor or activity overlay');
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Project/ }).click();
+  await page.locator('.workspace-subnav').getByRole('button', { name: 'Agents', exact: true }).click();
+  await page.getByLabel('Agent browser activity').getByText(/completed/).first().waitFor();
+  const activityText = await page.getByLabel('Agent browser activity').innerText();
+  assert.doesNotMatch(activityText, new RegExp(fillSecret), 'the activity feed never exposes a fill value');
+  await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
+  await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: /^Feedback/ }).click();
+
+  const screenshot = await client.callTool({ name: 'uidit_capture_screenshot', arguments: {} });
+  assert.equal(Boolean(screenshot.isError), false, JSON.stringify(screenshot));
+  assert.deepEqual(Object.keys(screenshot.structuredContent).sort(), ['artifact', 'status']);
+  assert.equal(screenshot.structuredContent.status, 'completed');
+  assert.deepEqual(Object.keys(screenshot.structuredContent.artifact).sort(), ['bytes', 'mimeType', 'path']);
+  assert.equal(screenshot.structuredContent.artifact.mimeType, 'image/jpeg');
+  assert.ok(screenshot.structuredContent.artifact.bytes > 100);
+  assert.doesNotMatch(JSON.stringify(screenshot), new RegExp(fillSecret), 'the screenshot response never exposes a fill value');
+  const navigationFrame = page.waitForEvent('framenavigated', (candidate) => candidate !== page.mainFrame() && candidate.url().includes('uidit-agent-navigation=e2e'));
+  const localNavigation = await client.callTool({ name: 'uidit_browser_action', arguments: { type: 'navigate', path: '/?uidit-agent-navigation=e2e' } });
+  assert.equal(Boolean(localNavigation.isError), false, JSON.stringify(localNavigation));
+  assert.deepEqual(localNavigation.structuredContent, { type: 'navigate', status: 'completed' });
+  frame = await navigationFrame;
+  assert.ok(frame.url().includes('uidit-agent-navigation=e2e'), 'navigation completes only after the replacement proxied preview is ready');
   for (const captureType of ['baseline', 'candidate']) {
     const capture = await fetch(`http://127.0.0.1:${DASH}/api/tasks/${encodeURIComponent(taskId)}/captures/${captureType}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${DASH}` }, body: '{}' });
     const captured = await capture.json();
@@ -595,14 +676,14 @@ try {
   const headingElement = state.elements.find((element) => /h1/.test(element.selector));
   assert.ok(headingElement?.accessibleName);
   assert.ok(headingElement?.nearbyText);
-  assert.equal(state.comments.length, 2);
+  assert.equal(state.comments.length, 3);
   assert.equal(state.comments.filter((c) => c.elementId).length, 2);
-  assert.equal(state.comments.filter((c) => !c.elementId && !c.drawing).length, 0);
+  assert.equal(state.comments.filter((c) => !c.elementId && !c.drawing).length, 1);
   assert.equal(state.comments.some((c) => c.drawing), false);
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.replies.length, 3);
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.status, 'needs_info');
   assert.equal(state.comments.find((c) => c.text === 'Give the heading more breathing room.')?.codeRefs[0]?.file, 'src/components/Checkout.tsx');
-  assert.equal(await frame.locator('.uidit-comment-marker').count(), 2);
+  assert.equal(await frame.locator('.uidit-comment-marker').count(), 3);
   assert.equal(state.edits.filter((e) => e.kind === 'style').length, 4, 'custom style edit and variant properties are recorded');
   assert.equal(state.elements.find((e) => e.selector.includes('pay'))?.page, `http://127.0.0.1:${FIXTURE_PORT}/`);
   assert.deepEqual(errors, [], 'browser page errors');

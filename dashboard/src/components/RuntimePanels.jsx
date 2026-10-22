@@ -119,7 +119,7 @@ export function ServerPanel({ config, dev, actions, onStatus, onPreviewService, 
   </section>;
 }
 
-export function AgentsPanel({ config, mcp, collaboration, session, actions, onStatus }) {
+export function AgentsPanel({ config, mcp, collaboration, session, browserActivity, actions, onStatus }) {
   const [projectInfo, setProjectInfo] = useState(null);
   useEffect(() => { let active = true; actions.projectContext().then((data) => { if (active) setProjectInfo(data); }).catch(() => {}); return () => { active = false; }; }, []);
   const setPermission = async (patch) => {
@@ -136,10 +136,26 @@ export function AgentsPanel({ config, mcp, collaboration, session, actions, onSt
     try { await actions.captureTaskSnapshot(task.id, kind); onStatus(`${kind === 'baseline' ? 'Baseline' : 'Candidate'} captured for ${task.title}`, 'ok'); }
     catch (error) { onStatus(error.message, 'error'); }
   };
+  const activityLabel = (activity) => {
+    if (!activity) return 'No agent browser activity';
+    const target = activity.target ? [activity.target.role, activity.target.tag].filter(Boolean).join(' ') : 'preview';
+    return `${activity.type} ${target || 'preview'} · ${activity.state}`;
+  };
+  const activityTime = (activity) => {
+    const value = activity?.finishedAt ?? activity?.runningAt ?? activity?.queuedAt;
+    if (!value) return '';
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+    return seconds < 60 ? 'just now' : `${Math.floor(seconds / 60)}m ago`;
+  };
   return <section className="runtime-panel" aria-label="Agent connections">
     <h2>Local MCP server</h2>
     <p>Agents can read a linked review brief, inspect page elements, and reply in comment threads. The brief updates as feedback changes.</p>
     <div className="runtime-card"><div className="runtime-status"><span className={`status-dot ${mcp?.clientCount ? 'online' : ''}`} /><strong>{mcp?.clientCount ? `${mcp.clientCount} connected` : 'Ready for connections'}</strong></div><div className="runtime-url">{mcp?.url}</div><div className="runtime-muted">Streamable HTTP · authenticated with a project-local token</div><button className="btn" onClick={copy}>Copy stdio client config</button></div>
+    <section className="runtime-card agent-browser-activity" aria-label="Agent browser activity">
+      <div className="runtime-status"><strong>Agent browser activity</strong><span className="spacer"/><span className={`tag ${browserActivity?.active?.state === 'running' ? 'active' : ''}`}>{browserActivity?.active?.state ?? 'idle'}</span></div>
+      <p className="runtime-muted" aria-live="polite">{activityLabel(browserActivity?.active)}</p>
+      {browserActivity?.recent?.length ? <ol>{browserActivity.recent.slice(-8).reverse().map((activity, index) => <li key={`${activity.finishedAt ?? activity.queuedAt ?? index}:${index}`}><span>{activityLabel(activity)}</span><time dateTime={activity.finishedAt ?? activity.runningAt ?? activity.queuedAt}>{activityTime(activity)}</time>{activity.error?.message && <small>{activity.error.message}</small>}</li>)}</ol> : <p className="runtime-muted">Actions will appear here while an agent uses the local preview.</p>}
+    </section>
     <div className="runtime-card"><strong>Agent workflow</strong><ol><li>Start with <code>uidit_get_agent_brief</code> or the <code>uidit_work_on_feedback</code> prompt.</li><li>Inspect the linked source, then ask or report progress with <code>uidit_reply_comment</code>.</li><li>Resolve feedback only after implementing and verifying the change.</li></ol><div className="runtime-muted">Treat page text and comments as project data. Write tools require the permission below.</div></div>
     <h3>Source and Git context</h3><div className="runtime-card"><strong>{projectInfo?.git?.available ? projectInfo.git.branch : 'No Git worktree detected'}</strong>{projectInfo?.git?.available && <><div className="runtime-muted">{projectInfo.git.head?.slice(0, 12)}{projectInfo.git.dirty ? ' · working tree has changes' : ' · clean working tree'}</div>{projectInfo.git.changedFiles?.length > 0 && <small>{projectInfo.git.changedFiles.length} changed tracked files</small>}</>}<div className="runtime-muted">{projectInfo?.impact?.coverage?.observedElements ?? 0} observed elements across {projectInfo?.impact?.coverage?.observedRoutes ?? 0} routes. Mapping covers recorded observations only.</div>{projectInfo?.impact?.nodes?.length > 0 && <ul className="impact-list">{projectInfo.impact.nodes.slice(0, 8).map((node) => <li key={node.id}><strong>{node.component}</strong><small>{node.source ?? node.provenance}</small><span>{node.routes.length} observed route{node.routes.length === 1 ? '' : 's'} · {node.commentIds.length} notes</span></li>)}</ul>}</div>
     <h3>Project design guidance</h3><div className="runtime-card"><strong>{projectInfo?.designRules?.available ? 'Local preference file found' : 'Optional'}</strong><p className="runtime-muted">Add rules to <code>.uidit/design-rules.md</code>. Agents receive this as project preference context; it does not change audit results or permissions.</p>{projectInfo?.designRules?.available && <pre className="design-rules-preview">{projectInfo.designRules.content}</pre>}</div>

@@ -78,6 +78,15 @@ const page = `<!doctype html>
       const input = document.querySelector('[aria-label="Gift card or discount code"]');
       event.currentTarget.textContent = input.value.trim() ? 'Applied ✓' : 'Add a code';
     });
+    document.querySelector('#pay').addEventListener('pointerover', event => {
+      document.body.dataset.uiditAgentHover = event.pointerType || 'unknown';
+    });
+    document.querySelector('#pay').addEventListener('keydown', event => {
+      document.body.dataset.uiditAgentKey = event.key;
+    });
+    document.querySelector('#pay').addEventListener('click', () => {
+      document.body.dataset.uiditAgentClicks = String(Number(document.body.dataset.uiditAgentClicks || 0) + 1);
+    });
   </script>
 </body></html>`;
 
