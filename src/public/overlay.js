@@ -446,6 +446,9 @@
     const sourceNodes = [source, ...source.querySelectorAll('*')];
     const cloneNodes = [clone, ...clone.querySelectorAll('*')];
     let embeddedAssetBytes = 0;
+    let reservedAssetBytes = 0;
+    let embeddedVideoBytes = 0;
+    let reservedVideoBytes = 0;
     const assetCache = new Map();
     const assetUrl = (rawUrl) => {
       try {
@@ -453,36 +456,108 @@
         return url.origin === location.origin && url.pathname.startsWith('/proxy/') ? url.href : null;
       } catch { return null; }
     };
-    const inlineLocalAsset = async (url) => {
-      try {
-        if (!url || embeddedAssetBytes >= 1_200_000) return null;
-        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 700);
-        const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal }).finally(() => clearTimeout(timeout));
-        const mime = response.headers.get('content-type')?.split(';')[0] || '';
+    const readBoundedBlob = async (response, limit) => {
+      const declared = Number(response.headers.get('content-length')) || 0;
+      if (declared > limit) { await response.body?.cancel(); return null; }
+      if (!response.body?.getReader) {
         const blob = await response.blob();
-        if (!response.ok || !/^image\/(?:jpeg|png|gif|webp|avif)$/.test(mime) || blob.size > 400_000 || embeddedAssetBytes + blob.size > 1_200_000) return null;
-        embeddedAssetBytes += blob.size;
-        const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-        return `data:${mime};base64,${btoa(binary)}`;
+        return blob.size <= limit ? blob : null;
+      }
+      const reader = response.body.getReader(), chunks = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > limit) { await reader.cancel(); return null; }
+          chunks.push(value);
+        }
+      } finally { reader.releaseLock(); }
+      return size ? new Blob(chunks, { type: response.headers.get('content-type') || '' }) : null;
+    };
+    const inlineLocalAsset = async (url) => {
+      const reservation = Math.min(1_000_000, 2_000_000 - embeddedAssetBytes - reservedAssetBytes);
+      if (!url || reservation <= 0) return null;
+      reservedAssetBytes += reservation;
+      try {
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 700);
+        try {
+          const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal });
+          const mime = response.headers.get('content-type')?.split(';')[0] || '';
+          if (!response.ok || !/^image\/(?:jpeg|png|gif|webp|avif)$/.test(mime)) { await response.body?.cancel(); return null; }
+          const blob = await readBoundedBlob(response, reservation);
+          if (!blob) return null;
+          embeddedAssetBytes += blob.size;
+          const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+          return `data:${mime};base64,${btoa(binary)}`;
+        } finally { clearTimeout(timeout); }
       } catch { return null; }
+      finally { reservedAssetBytes -= reservation; }
     };
     const visualProperties = 'display visibility position inset top right bottom left z-index box-sizing width min-width max-width height min-height max-height margin margin-top margin-right margin-bottom margin-left padding padding-top padding-right padding-bottom padding-left overflow overflow-x overflow-y flex flex-direction flex-wrap flex-grow flex-shrink flex-basis align-items align-content align-self justify-content justify-items gap row-gap column-gap grid grid-template-columns grid-template-rows grid-column grid-row order float clear transform transform-origin opacity color background-color background-image background-size background-position background-repeat border border-top border-right border-bottom border-left border-radius box-shadow object-fit object-position font-family font-size font-style font-weight line-height letter-spacing text-align text-decoration text-transform white-space word-break overflow-wrap list-style list-style-type cursor';
     const properties = visualProperties.split(' ');
     const backgroundAssets = [];
     const imageAssets = [];
+    const videoPosterAssets = [];
     for (let index = 0; index < sourceNodes.length; index += 1) {
       const original = sourceNodes[index];
       if (original.closest?.('[data-uidit-ui]')) continue;
       const background = getComputedStyle(original).getPropertyValue('background-image');
       for (const match of background.matchAll(/url\((?:"|')?(.*?)(?:"|')?\)/g)) backgroundAssets.push(assetUrl(match[1]));
       if (original.matches?.('img')) imageAssets.push(assetUrl(original.currentSrc || original.getAttribute('src') || ''));
+      if (original.matches?.('video') && original.poster) videoPosterAssets.push(assetUrl(original.poster));
     }
     // Fetch a bounded, de-duplicated set concurrently. A slow local image cannot hold
     // the rest of the snapshot hostage, and all results still pass the byte/type caps.
-    const candidates = [...new Set([...backgroundAssets, ...imageAssets].filter(Boolean))].slice(0, 20);
+    const candidates = [...new Set([...videoPosterAssets, ...backgroundAssets, ...imageAssets].filter(Boolean))].slice(0, 30);
     await Promise.all(candidates.map(async (url) => assetCache.set(url, await inlineLocalAsset(url))));
     const embeddedAsset = (rawUrl) => assetCache.get(assetUrl(rawUrl)) ?? null;
+    const inlineLocalVideo = async (video) => {
+      const reservation = Math.min(2_400_000, 4_800_000 - embeddedVideoBytes - reservedVideoBytes);
+      if (reservation <= 0) return null;
+      reservedVideoBytes += reservation;
+      try {
+        const raw = video.currentSrc || video.querySelector('source')?.getAttribute('src') || video.getAttribute('src') || '';
+        const url = assetUrl(raw);
+        if (!url) return null;
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 900);
+        try {
+          const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal });
+          const mime = response.headers.get('content-type')?.split(';')[0] || '';
+          if (!response.ok || !/^video\/(?:mp4|webm)$/.test(mime)) { await response.body?.cancel(); return null; }
+          const blob = await readBoundedBlob(response, reservation);
+          if (!blob) return null;
+          const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+          const dataUrl = `data:${mime};base64,${btoa(binary)}`;
+          embeddedVideoBytes += blob.size;
+          return { dataUrl, mime };
+        } finally { clearTimeout(timeout); }
+      } catch { return null; }
+      finally { if (reservation > 0) reservedVideoBytes -= reservation; }
+    };
+    const videoAssets = new Map();
+    await Promise.all(sourceNodes.filter((node) => node.matches?.('video')).map(async (video) => {
+      const asset = await inlineLocalVideo(video);
+      if (asset) videoAssets.set(video, asset);
+    }));
+    const videoFrame = (video) => {
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight || embeddedVideoBytes >= 5_200_000) return null;
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 640 / video.videoWidth, 900 / video.videoHeight);
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.68);
+        const bytes = Math.ceil(dataUrl.length * 0.75);
+        if (!dataUrl.startsWith('data:image/jpeg;base64,') || bytes > 240_000 || embeddedVideoBytes + bytes > 5_200_000) return null;
+        embeddedVideoBytes += bytes;
+        return dataUrl;
+      } catch { return null; }
+    };
     for (let index = 0; index < sourceNodes.length; index += 1) {
       const original = sourceNodes[index], target = cloneNodes[index];
       if (!target || original.closest?.('[data-uidit-ui]')) continue;
@@ -497,6 +572,24 @@
         declarations.push(`${name}:${value}`);
       }
       target.setAttribute('style', declarations.join(';'));
+      if (original.matches?.('video')) {
+        const media = videoAssets.get(original);
+        const still = media ? null : videoFrame(original) || embeddedAsset(original.poster) || (original.poster.startsWith('data:image/') ? original.poster : null);
+        target.removeAttribute('src');
+        target.removeAttribute('autoplay');
+        target.removeAttribute('loop');
+        target.removeAttribute('controls');
+        target.querySelectorAll('source,track').forEach((node) => node.remove());
+        if (media) {
+          target.removeAttribute('poster');
+          target.setAttribute('controls', '');
+          target.setAttribute('muted', '');
+          target.setAttribute('playsinline', '');
+          target.setAttribute('preload', 'metadata');
+          const source = document.createElement('source'); source.src = media.dataUrl; source.type = media.mime; target.append(source);
+        } else if (still) target.setAttribute('poster', still);
+        else target.removeAttribute('poster');
+      }
       if (original.matches?.('input,textarea,select,[contenteditable="true"]')) {
         target.removeAttribute('value'); target.removeAttribute('checked'); target.removeAttribute('selected');
         if (target.matches('textarea') || target.isContentEditable) target.textContent = '';
@@ -522,7 +615,7 @@
     }
     clone.setAttribute('data-uidit-snapshot', '1');
     const html = `<!doctype html>${clone.outerHTML}`;
-    if (html.length > 2_000_000) throw new Error('HTML snapshot exceeds 2 MB; use a smaller page or a page image');
+    if (html.length > 12_000_000) throw new Error('HTML snapshot exceeds the 12 MB sharing limit; use a smaller page or a page image');
     return { html, width, height, url: realPage() };
   };
   const recordStep = (type, el, action = type) => {

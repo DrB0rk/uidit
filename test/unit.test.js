@@ -93,7 +93,11 @@ test('shared HTML snapshots are bounded and remove sensitive query values', asyn
     assert.equal(sent.url, 'https://share.uidit.app/api/rooms/room-1/page-view');
     assert.equal(sent.body.url, 'http://127.0.0.1:4321/?tab=home');
     assert.match(sent.body.html, /Preview/);
-    await assert.rejects(manager.sharePageSnapshot({ html: '<!doctype html>' + 'x'.repeat(2_000_000), width: 1, height: 1 }), /exceeds 2 MB/);
+    const mediaHtml = `<!doctype html><html><body><video controls><source src="data:video/mp4;base64,AAAA"></video>${'x'.repeat(2_100_000)}</body></html>`;
+    const mediaPage = await manager.sharePageSnapshot({ html: mediaHtml, width: 1280, height: 800 });
+    assert.equal(mediaPage.kind, 'html');
+    assert.equal(sent.body.html, mediaHtml, 'bounded video snapshots above the old 2 MB cap can reach the relay');
+    await assert.rejects(manager.sharePageSnapshot({ html: '<!doctype html>' + 'x'.repeat(12_000_000), width: 1, height: 1 }), /12 MB sharing limit/);
   } finally { globalThis.fetch = originalFetch; manager.close(); }
 });
 

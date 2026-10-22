@@ -64,7 +64,7 @@ try {
   await shareCard.getByRole('button', { name: 'Create link' }).click();
   assert.equal(await shareCard.getByLabel('Team review share link').inputValue(), shareUrl, 'one click creates a uidit.app review link');
   assert.equal(await shareCard.locator('input[type="password"]').count(), 0, 'sharing never asks for a relay secret');
-  assert.match(await shareCard.innerText(), /captures a static HTML snapshot automatically; scripts and controls are disabled/);
+  assert.match(await shareCard.innerText(), /captures a sanitized HTML snapshot automatically; scripts are disabled; small local videos are embedded and playable/);
   await page.route(`http://127.0.0.1:${DASH}/api/collaboration/stop`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ collaboration: { enabled: false, connected: false, participants: [] } }) }));
   page.once('dialog', (dialog) => dialog.accept());
   await shareCard.getByRole('button', { name: 'Stop sharing' }).click();
@@ -191,7 +191,12 @@ try {
     const video = document.createElement('video');
     video.id = 'inspect-video';
     video.setAttribute('aria-label', 'Gallery clip');
+    video.setAttribute('poster', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN2cAAAAASUVORK5CYII=');
     video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.8;background:#222';
+    const source = document.createElement('source');
+    source.src = '/proxy/test-media.mp4';
+    source.type = 'video/mp4';
+    video.append(source);
     shell.append(poster, video);
     document.body.append(shell);
   });
@@ -200,6 +205,25 @@ try {
   await frame.locator('#inspect-media-poster').click();
   await frame.waitForFunction(() => document.querySelector('#inspect-video')?.getAttribute('data-uidit-selected') === '1');
   assert.equal(await frame.locator('#inspect-media-poster').getAttribute('data-uidit-selected'), null, 'a pointer-transparent video overlay is selected ahead of its poster layer');
+  const sourceViewport = await frame.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const capturedPage = await page.evaluate(async () => {
+    const iframe = document.querySelector('iframe.immersive-preview');
+    const id = 'e2e-share-snapshot';
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { removeEventListener('message', receive); reject(new Error('timed out capturing the shared HTML snapshot')); }, 8000);
+      const receive = (event) => {
+        if (event.source !== iframe.contentWindow || event.data?.type !== 'browser-action-result' || event.data?.id !== id) return;
+        clearTimeout(timer); removeEventListener('message', receive); resolve(event.data);
+      };
+      addEventListener('message', receive);
+      iframe.contentWindow.postMessage({ source: 'uidit-dashboard', type: 'browserAction', id, action: { type: 'share-page-view' } }, new URL(iframe.src).origin);
+    });
+  });
+  assert.equal(capturedPage.ok, true, 'the project preview can capture a bounded shared page snapshot');
+  assert.deepEqual({ width: capturedPage.result.width, height: capturedPage.result.height }, sourceViewport, 'the shared view records its real source viewport dimensions');
+  assert.match(capturedPage.result.html, /data:video\/mp4;base64,VUlESVQgcHJldmlldyBtZWRpYSBmaXh0dXJl/, 'the local video media is embedded for reviewers');
+  assert.doesNotMatch(capturedPage.result.html, /test-media\.mp4/, 'the shared snapshot does not depend on the owner’s local proxy');
+  assert.match(capturedPage.result.html, /<video[^>]*controls/, 'reviewers can play embedded video media');
   await frame.locator('#inspect-media-shell').evaluate((el) => el.remove());
   await frame.locator('#pay').click();
   await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('data-uidit-selected') === '1');

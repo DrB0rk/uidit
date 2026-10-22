@@ -96,7 +96,7 @@ export class CollaborationManager {
   }
   async sharePageSnapshot({ html, width, height, url }) {
     if (!this.config?.roomId || !this.config?.ownerToken) throw new Error('Create a review link before sharing the page');
-    if (typeof html !== 'string' || !html.startsWith('<!doctype html>') || html.length > 2_000_000) throw new Error('The HTML page snapshot is missing or exceeds 2 MB');
+    if (typeof html !== 'string' || !html.startsWith('<!doctype html>') || html.length > 12_000_000) throw new Error('The HTML page snapshot is missing or exceeds the 12 MB sharing limit');
     let sharedPageUrl = String(url || '');
     try {
       const current = new URL(sharedPageUrl);

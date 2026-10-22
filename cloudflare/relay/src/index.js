@@ -171,9 +171,9 @@ export class CollaborationRoom extends DurableObject {
       try { body = await request.json(); } catch { return json({ error: 'invalid JSON' }, 400); }
       const width = Number(body.width), height = Number(body.height);
       if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 10000 || height > 10000) return json({ error: 'valid page dimensions are required' }, 400);
-      const isHtmlSnapshot = typeof body.html === 'string' && body.html.startsWith('<!doctype html>') && body.html.length <= 2_000_000;
+      const isHtmlSnapshot = typeof body.html === 'string' && body.html.startsWith('<!doctype html>') && body.html.length <= 12_000_000;
       const isImageSnapshot = typeof body.dataUrl === 'string' && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(body.dataUrl) && body.dataUrl.length <= 3_400_000;
-      if (!isHtmlSnapshot && !isImageSnapshot) return json({ error: 'provide a sanitized HTML snapshot up to 2 MB or a JPEG/PNG snapshot up to 2.5 MiB' }, 400);
+      if (!isHtmlSnapshot && !isImageSnapshot) return json({ error: 'provide a sanitized HTML snapshot up to 12 MB or a JPEG/PNG snapshot up to 2.5 MiB' }, 400);
       state.pageView = { ...(isHtmlSnapshot ? { html: body.html } : { dataUrl: body.dataUrl }), width, height, url: typeof body.url === 'string' ? body.url.slice(0, 2000) : '', capturedAt: new Date().toISOString() };
       this.saveState(state); await this.savePayload('page-view', JSON.stringify(state.pageView)); this.broadcast({ type: 'snapshot', room: this.publicState(state) });
       return json({ pageView: { width, height, url: state.pageView.url, kind: isHtmlSnapshot ? 'html' : 'image', capturedAt: state.pageView.capturedAt } });

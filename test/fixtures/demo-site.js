@@ -91,6 +91,11 @@ const page = `<!doctype html>
 </body></html>`;
 
 export const server = http.createServer((req, res) => {
+  if (req.url === '/test-media.mp4') {
+    const clip = Buffer.from('UIDIT preview media fixture');
+    res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': clip.length });
+    return res.end(clip);
+  }
   if (req.url === '/api/cart') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ items: 3 }));

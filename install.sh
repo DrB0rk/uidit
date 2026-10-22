@@ -6,7 +6,7 @@
 set -eu
 
 REPO="DrB0rk/uidit"
-VERSION="${UIDIT_VERSION:-0.10.9}"
+VERSION="${UIDIT_VERSION:-0.10.10}"
 MIN_NODE_MAJOR=22
 PACKAGE_NAME="@drb0rk/uidit"
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.10 — 2026-10-22
+
+- Size shared HTML previews to the original page viewport, with tablet, phone,
+  and custom viewport options that keep feedback pins aligned while scrolling.
+- Embed bounded local images, video posters, and small playable video files in
+  the shared snapshot so reviewers do not depend on the owner's local server.
+- Bound streamed media downloads and cap snapshots at 12 MB.
+
 ## 0.10.9 — 2026-10-22
 
 - Inspect selects visible video layers even when the page disables their pointer events.
