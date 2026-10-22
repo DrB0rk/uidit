@@ -1,93 +1,88 @@
 #!/usr/bin/env sh
-# uidit installer
+# Install UIDIT from a public GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
-#
-# Installs the `uidit` command. Needs Node 22+ and npm; if either is missing the
-# script stops and tells you what to install rather than half-installing something.
 
 set -eu
 
 REPO="DrB0rk/uidit"
-VERSION="0.10.4"
+VERSION="${UIDIT_VERSION:-0.10.7}"
 MIN_NODE_MAJOR=22
+PACKAGE_NAME="@drb0rk/uidit"
 
-say()  { printf '%s\n' "$*"; }
-warn() { printf '  %s\n' "$*" >&2; }
-die()  { printf '\nError: %s\n' "$*" >&2; exit 1; }
+die() { printf '\n  Error: %s\n' "$*" >&2; exit 1; }
+step() { printf '\n  [%s] %s\n' "$1" "$2"; }
 
-printf '\n  uidit — local UI review dashboard\n\n'
+case "$VERSION" in
+  ''|*[!0-9.]*|.*|*.|*..*) die "invalid UIDIT_VERSION '$VERSION' (expected a version such as 0.10.7)" ;;
+esac
 
-# --- prerequisites ------------------------------------------------------------
-command -v node >/dev/null 2>&1 || die "Node.js ${MIN_NODE_MAJOR}+ is required but was not found.
-  Install it from https://nodejs.org (or via nvm: nvm install --lts) and re-run."
+printf '\n  uidit installer\n  Release v%s · GitHub: https://github.com/%s/releases/tag/v%s\n' "$VERSION" "$REPO" "$VERSION"
 
-command -v npm >/dev/null 2>&1 || die "npm is required but was not found.
-  Install it from https://nodejs.org and re-run."
+step 1/4 "Checking requirements"
+command -v node >/dev/null 2>&1 || die "Node.js ${MIN_NODE_MAJOR}+ is required. Install it from https://nodejs.org and run this installer again."
+command -v npm >/dev/null 2>&1 || die "npm is required. Install Node.js from https://nodejs.org and run this installer again."
 
-node_major() { node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0; }
+NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || printf '0')
+case "$NODE_MAJOR" in *[!0-9]*|'') NODE_MAJOR=0 ;; esac
+[ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ] || die "Node $(node -v) is too old; UIDIT v${VERSION} requires Node ${MIN_NODE_MAJOR}+."
 
-if [ "$(node_major)" -lt "$MIN_NODE_MAJOR" ]; then
-  die "Node $(node -v) is too old. uidit needs Node ${MIN_NODE_MAJOR}+."
-fi
+printf '      Node.js %s\n      npm %s\n' "$(node -v)" "$(npm -v)"
+if command -v uname >/dev/null 2>&1; then printf '      Platform %s\n' "$(uname -srm)"; fi
 
-printf '  node %s · npm %s\n' "$(node -v)" "$(npm -v)"
-
-# --- install ------------------------------------------------------------------
-# Install the versioned release tarball hosted directly on GitHub.
+step 2/4 "Downloading the GitHub release"
 PACKAGE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/drb0rk-uidit-${VERSION}.tgz"
 SOURCE_URL="https://codeload.github.com/${REPO}/tar.gz/refs/tags/v${VERSION}"
-TARBALL="$(mktemp -t uidit.XXXXXX.tar.gz)"
-trap 'rm -f "$TARBALL"' EXIT INT TERM
+TARBALL=$(mktemp -t uidit.XXXXXX.tar.gz) || die "could not create a temporary download file"
+trap 'rm -f "$TARBALL"' 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-installed=""
-say "  installing directly from the GitHub release"
-if curl -fsSL "$PACKAGE_URL" -o "$TARBALL" && npm install -g "$TARBALL" >/dev/null 2>&1 && command -v uidit >/dev/null 2>&1; then
-  installed="GitHub release"
+if curl --fail --location --show-error --retry 2 --retry-delay 1 --progress-bar "$PACKAGE_URL" --output "$TARBALL"; then
+  INSTALL_SOURCE="GitHub release"
+else
+  printf '\n      Release archive unavailable; trying the tagged GitHub source.\n' >&2
+  if curl --fail --location --show-error --retry 2 --retry-delay 1 --progress-bar "$SOURCE_URL" --output "$TARBALL"; then
+    INSTALL_SOURCE="GitHub source archive"
+  else
+    die "could not download UIDIT v${VERSION}. Check https://github.com/${REPO}/releases/tag/v${VERSION} and try again."
+  fi
 fi
 
-if [ -z "$installed" ]; then
-  say "  release package unavailable; installing the tagged source"
-  curl -fsSL "$SOURCE_URL" -o "$TARBALL" || die "could not download $SOURCE_URL
-  Check the URL manually, or clone https://github.com/${REPO} and run: npm install -g ."
-  npm install -g "$TARBALL" >/dev/null 2>&1 || die "npm install failed.
-  Re-run with the log: sh -x <(curl -fsSL $0) 2>&1 | tail -40"
-  installed="GitHub source"
+step 3/4 "Installing UIDIT v${VERSION} from ${INSTALL_SOURCE}"
+npm install --global "$TARBALL" || die "npm could not install UIDIT. Review the npm output above, fix the reported issue, and rerun this command."
+
+GLOBAL_PREFIX=$(npm prefix --global) || die "npm could not determine its global install directory"
+GLOBAL_ROOT=$(npm root --global) || die "npm could not determine its global package directory"
+UIDIT_BIN="${GLOBAL_PREFIX}/bin/uidit"
+PACKAGE_JSON="${GLOBAL_ROOT}/${PACKAGE_NAME}/package.json"
+[ -x "$UIDIT_BIN" ] || die "UIDIT was installed, but its executable is missing at ${UIDIT_BIN}. Check npm's global install output."
+[ -f "$PACKAGE_JSON" ] || die "UIDIT was installed, but its package metadata is missing at ${PACKAGE_JSON}."
+
+INSTALLED_VERSION=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).version)' "$PACKAGE_JSON") || die "could not read the installed UIDIT version"
+[ "$INSTALLED_VERSION" = "$VERSION" ] || die "expected UIDIT v${VERSION}, but npm installed v${INSTALLED_VERSION}"
+
+if [ ! -f "${GLOBAL_ROOT}/${PACKAGE_NAME}/dashboard/dist/index.html" ]; then
+  step 4/4 "Building the dashboard"
+  "$UIDIT_BIN" build || die "the dashboard build failed. Review the output above and rerun the installer."
+else
+  step 4/4 "Checking the installed command"
 fi
 
-if [ "$installed" = "GitHub release" ]; then
-  printf '  installed from the public GitHub release\n'
-fi
+"$UIDIT_BIN" --help >/dev/null 2>&1 || die "UIDIT v${VERSION} is installed but could not start. Report this at https://github.com/${REPO}/issues"
 
-# npm >= 11 blocks dependency install scripts unless explicitly allowed, so the
-# dashboard UI may not have been built during install. Build it now — `uidit start`
-# would otherwise build on first launch and look broken meanwhile.
-UI_BUILT=""
-for d in "$(npm prefix -g)/lib/node_modules/@drb0rk/uidit" "$(npm prefix -g)/node_modules/@drb0rk/uidit" "$(npm prefix -g)/lib/node_modules/uidit" "$(npm prefix -g)/node_modules/uidit"; do
-  [ -f "$d/dashboard/dist/index.html" ] && { UI_BUILT=1; break; }
-done
-
-if [ -z "$UI_BUILT" ]; then
-  say "  building the dashboard UI"
-  uidit build >/dev/null 2>&1 || warn "could not pre-build the UI; it will build on first run"
-fi
-
-command -v uidit >/dev/null 2>&1 || die "install completed but 'uidit' is not on PATH.
-  Add your npm global bin to PATH:
-    export PATH=\"\$PATH:\$(npm prefix -g)/bin\""
-
-printf '  %s\n' "uidit installed ($installed) → $(command -v uidit)"
-
-# --- verify it actually runs --------------------------------------------------
-uidit --help >/dev/null 2>&1 || die "uidit was installed but did not run.
-  Please report this at https://github.com/${REPO}/issues"
+printf '\n  Installed UIDIT v%s\n  Source: %s\n  Command: %s\n' "$INSTALLED_VERSION" "$INSTALL_SOURCE" "$UIDIT_BIN"
+case ":${PATH}:" in
+  *":${GLOBAL_PREFIX}/bin:"*) ;;
+  *) printf '\n  Add the command to your PATH to run `uidit` from any terminal:\n    export PATH="%s/bin:$PATH"\n' "$GLOBAL_PREFIX" ;;
+esac
 
 cat <<EOF
 
   Next:
     cd your-project
     uidit init      # once, creates .uidit/
-    uidit           # start the dashboard, then hit Discover
+    uidit           # start the dashboard and choose your dev server
 
   Docs: https://github.com/${REPO}#readme
 EOF

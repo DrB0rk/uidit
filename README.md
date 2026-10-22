@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.6">Latest release: v0.10.6</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.7">Latest release: v0.10.7</a> · Node.js 22+</p>
 
 ---
 
@@ -25,14 +25,17 @@ uidit closes that gap. Your feedback is already structured data in the project.
 curl -fsSL https://raw.githubusercontent.com/DrB0rk/uidit/HEAD/install.sh | sh
 ```
 
-Needs Node 22+ and npm. The installer downloads the versioned release tarball
-directly from GitHub, installs the `uidit` command, and verifies it runs before
-exiting. From a clone instead: `npm install -g .`
+Needs Node 22+ and npm. The installer prints the release version and platform,
+shows download progress, reports the installed command path, and verifies the
+installed package version and CLI. It downloads directly from GitHub, with a
+tagged-source fallback if the release archive is unavailable. Set
+`UIDIT_VERSION` to install a specific tagged release. From a clone instead:
+`npm install -g .`
 
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.6/drb0rk-uidit-0.10.6.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.7/drb0rk-uidit-0.10.7.tgz
 ```
 
 ## Use

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.7 — 2026-10-22
+
+- Overhauled the curl installer with numbered progress, visible download progress,
+  release and runtime version details, exact installed-version verification, and
+  actionable PATH and failure messages. It falls back from a missing release
+  asset to the matching GitHub source archive.
+- Kept installer and release version pins aligned at v0.10.7.
+
 ## 0.10.6 — 2026-10-22
 
 - Added a local live browser activity view for MCP-driven actions. The preview
