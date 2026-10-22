@@ -53,8 +53,10 @@ try {
   assert.ok(frame, `proxied preview frame did not load: ${JSON.stringify({ src: await page.locator('iframe.immersive-preview').getAttribute('src'), frames: page.frames().map((f) => f.url()) })}`);
   await frame.locator('#uidit-context-menu').waitFor({ state: 'attached', timeout: 10000 });
 
-  // Team sharing lives in its own tab so the default feedback screen stays
-  // focused on page notes and inspection.
+  // Keep Review focused on feedback, changes, and team sharing. Element
+  // inspection is the separate toolbar mode, not a growing click history tab.
+  assert.equal(await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: 'Inspect', exact: true }).count(), 0, 'Review has no click-history Inspect tab');
+  assert.equal(await page.getByRole('button', { name: 'Inspect', exact: true }).count(), 1, 'the main toolbar keeps its Inspect tool');
   const teamTab = page.getByRole('tab', { name: 'Team', exact: true });
   assert.equal(await page.getByRole('region', { name: 'Share team review' }).count(), 0, 'the team review card is hidden from the default feedback view');
   await teamTab.click();
@@ -701,7 +703,7 @@ try {
     await page.locator('.workspace-content').waitFor();
   }
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Review/ }).click();
-  for (const label of ['Feedback', 'Inspect', 'Changes']) {
+  for (const label of ['Feedback', 'Changes', 'Team']) {
     await page.locator('.workspace-content .side > .tabs').getByRole('tab', { name: new RegExp(`^${label}`) }).click();
   }
   await page.locator('.workspace-tabs').getByRole('button', { name: /^Runtime/ }).click();

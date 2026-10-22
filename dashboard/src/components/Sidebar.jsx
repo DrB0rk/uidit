@@ -333,46 +333,6 @@ function FeedbackTriage({ comments, elements }) {
   </section>;
 }
 
-function ElementItem({ element, selected, commentCount, onSelect, onDelete, findSource, onStatus }) {
-  const [source, setSource] = useState(null);
-  const [sourceBusy, setSourceBusy] = useState(false);
-  const inspectSource = async () => {
-    setSourceBusy(true);
-    try { setSource(await findSource(element.id)); }
-    catch (error) { onStatus(error.message, 'error'); }
-    finally { setSourceBusy(false); }
-  };
-  return (
-    <li className={`item${selected ? ' selected' : ''}`}>
-      <div className="item-top">
-        <span className="tag">{element.tag}</span>
-        <button type="button" className="item-selector" onClick={() => onSelect(element.id)}>
-          {element.selector}
-        </button>
-        <span className="item-actions">
-          <button
-            type="button"
-            className="btn sm ghost"
-            onClick={(e) => { e.stopPropagation(); onDelete(element); }}
-          >
-            <X size={14} aria-hidden="true" />
-            <span className="sr-only">Remove tagged element</span>
-          </button>
-        </span>
-      </div>
-      {element.accessibleName && <div className="element-context"><strong>{element.role ?? element.tag}</strong><span>{element.accessibleName}</span>{element.component && <small>{element.component.framework} · {element.component.name}</small>}</div>}
-      {element.text && <div className="item-text muted">{element.text.slice(0, 140)}</div>}
-      {element.nearbyText && element.nearbyText !== element.text && <div className="element-nearby" title={element.nearbyText}>Nearby: {element.nearbyText.slice(0, 140)}</div>}
-      <div className="element-source-actions"><button type="button" className="btn sm ghost" onClick={inspectSource}>{sourceBusy ? 'Searching…' : source ? 'Refresh source suggestions' : 'Find source'}</button><button type="button" className="btn sm ghost" onClick={() => navigator.clipboard?.writeText(JSON.stringify({ selector: element.selector, role: element.role, accessibleName: element.accessibleName, component: element.component, ancestors: element.ancestors }, null, 2))}>Copy agent context</button></div>
-      {source && <div className="source-suggestions"><strong>{source.status === 'inferred' ? 'Suggested source · confirm manually' : 'Source unavailable'}</strong>{source.candidates?.map((candidate) => <div key={`${candidate.file}:${candidate.line}`}><code>{candidate.file}:{candidate.line}</code><small>{candidate.snippet}</small></div>)}<small>{source.limitation}</small></div>}
-      <div className="item-meta">
-        <span>{commentCount} comment{commentCount === 1 ? '' : 's'}</span>
-        {element.ancestors?.length > 0 && <span>{element.ancestors.slice(-2).join(' ← ')}</span>}
-      </div>
-    </li>
-  );
-}
-
 function EditItem({ edit, element, onToggle, onDelete }) {
   return (
     <li className="item">
@@ -444,7 +404,6 @@ export function toMarkdown(session) {
 
 const TABS = [
   ['feedback', 'Feedback'],
-  ['inspect', 'Inspect'],
   ['changes', 'Changes'],
   ['share', 'Team'],
 ];
@@ -496,7 +455,7 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
 
   const openCount = session.comments.filter((c) => !c.resolved).length;
   const pendingEdits = session.edits.filter((e) => !e.applied).length;
-  const counts = { feedback: openCount, inspect: session.elements.length, changes: pendingEdits };
+  const counts = { feedback: openCount, changes: pendingEdits };
   const filteredComments = [...session.comments].filter((c) => filter === 'all' || (filter === 'resolved' ? c.resolved : !c.resolved)).filter((c) => !query || [c.text, c.page, session.elements.find((element) => element.id === c.elementId)?.selector].filter(Boolean).join(' ').toLowerCase().includes(query.toLowerCase())).reverse();
 
   const copyFeedback = async () => {
@@ -565,29 +524,6 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
             ))}
           </ul>
           <AgentTaskQueue tasks={session.tasks} evidence={session.evidence} onUpdate={actions.updateTask} onStatus={onStatus} />
-        </div>
-      )}
-
-      {tab === 'inspect' && (
-        <div className="panel" role="tabpanel" id="panel-inspect" aria-labelledby={showTabs ? 'tab-inspect' : undefined}>
-          <div className="panel-heading"><h2>Tagged elements</h2><span>{session.elements.length}</span></div>
-          <ul className="list">
-            {session.elements.length === 0 && (
-              <li className="empty-state">Click an element in the preview to tag it.</li>
-            )}
-            {session.elements.map((e) => (
-              <ElementItem
-                key={e.id}
-                element={e}
-                selected={e.id === selectedId}
-                commentCount={session.comments.filter((c) => c.elementId === e.id).length}
-                onSelect={onSelect}
-                onDelete={drop.bind(null, 'elements', e.id)}
-                findSource={actions.elementSource}
-                onStatus={onStatus}
-              />
-            ))}
-          </ul>
         </div>
       )}
 

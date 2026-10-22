@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.11 — 2026-10-22
+
+- Remove the redundant Review Inspect tab and its click-history element list.
+  Element inspection remains available from the main toolbar.
+
 ## 0.10.10 — 2026-10-22
 
 - Size shared HTML previews to the original page viewport, with tablet, phone,

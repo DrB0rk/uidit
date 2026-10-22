@@ -11,7 +11,7 @@ const AgentsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({
 const SettingsPanel = lazy(() => import('./RuntimePanels.jsx').then((module) => ({ default: module.SettingsPanel })));
 
 const TABS = [['review', 'Review', MessageSquareText], ['design', 'Design', WandSparkles], ['runtime', 'Runtime', Workflow], ['project', 'Project', Settings2]];
-const REVIEW_TABS = ['feedback', 'inspect', 'changes', 'share'];
+const REVIEW_TABS = ['feedback', 'changes', 'share'];
 const RUNTIME_TABS = [['flows', 'Flows'], ['server', 'Server']];
 const PROJECT_TABS = [['agents', 'Agents'], ['settings', 'Settings']];
 const TAB_GROUP = { review: 'review', feedback: 'review', inspect: 'review', changes: 'review', share: 'review', design: 'design', runtime: 'runtime', flows: 'runtime', server: 'runtime', project: 'project', agents: 'project', settings: 'project' };
