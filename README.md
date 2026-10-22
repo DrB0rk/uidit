@@ -7,7 +7,7 @@
   Everything lands in <code>.uidit/</code> so a coding agent can pick it up.
 </p>
 
-<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.8">Latest release: v0.10.8</a> · Node.js 22+</p>
+<p align="center"><a href="https://github.com/DrB0rk/uidit/releases/tag/v0.10.9">Latest release: v0.10.9</a> · Node.js 22+</p>
 
 ---
 
@@ -35,7 +35,7 @@ tagged-source fallback if the release archive is unavailable. Set
 For a direct anonymous install, use the public release tarball:
 
 ```sh
-npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.8/drb0rk-uidit-0.10.8.tgz
+npm install -g https://github.com/DrB0rk/uidit/releases/download/v0.10.9/drb0rk-uidit-0.10.9.tgz
 ```
 
 ## Use

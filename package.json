@@ -1,6 +1,6 @@
 {
   "name": "@drb0rk/uidit",
-  "version": "0.10.8",
+  "version": "0.10.9",
   "description": "Local UI review dashboard: tag elements, comment, and make simple edits directly on a running dev server. Everything persists to .uidit for coding agents to read.",
   "type": "module",
   "bin": {

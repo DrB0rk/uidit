@@ -53,8 +53,11 @@ try {
   assert.ok(frame, `proxied preview frame did not load: ${JSON.stringify({ src: await page.locator('iframe.immersive-preview').getAttribute('src'), frames: page.frames().map((f) => f.url()) })}`);
   await frame.locator('#uidit-context-menu').waitFor({ state: 'attached', timeout: 10000 });
 
-  // A team review invite can be created from the feedback sidebar without
-  // leaving the page or visiting the Agents settings view.
+  // Team sharing lives in its own tab so the default feedback screen stays
+  // focused on page notes and inspection.
+  const teamTab = page.getByRole('tab', { name: 'Team', exact: true });
+  assert.equal(await page.getByRole('region', { name: 'Share team review' }).count(), 0, 'the team review card is hidden from the default feedback view');
+  await teamTab.click();
   const shareCard = page.getByRole('region', { name: 'Share team review' });
   const shareUrl = 'https://share.uidit.app/room/e2e-room#e2e-token';
   await page.route(`http://127.0.0.1:${DASH}/api/collaboration/room`, (route) => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ collaboration: { enabled: true, connected: true, roomId: 'e2e-room', project: 'e2e', inviteUrl: shareUrl, inviteExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), participants: [] } }) }));
@@ -69,6 +72,7 @@ try {
   assert.equal(await shareCard.getByLabel('Team review share link').count(), 0, 'stopping sharing removes the active invite from the dashboard');
   await page.unroute(`http://127.0.0.1:${DASH}/api/collaboration/room`);
   await page.unroute(`http://127.0.0.1:${DASH}/api/collaboration/stop`);
+  await page.getByRole('tab', { name: 'Feedback', exact: true }).click();
 
   // Device presets change the actual browsing context, and reference matching
   // supports both an overlay and a side-by-side comparison.
@@ -177,6 +181,26 @@ try {
   await frame.locator('#pay').hover();
   await page.waitForTimeout(200);
   assert.ok(await frame.evaluate(() => document.querySelectorAll('[data-uidit-hover]').length) > 0, 'inspection from the preview highlights page elements');
+  await frame.evaluate(() => {
+    const shell = document.createElement('div');
+    shell.id = 'inspect-media-shell';
+    shell.style.cssText = 'position:fixed;left:110px;top:150px;width:180px;height:120px;z-index:1000';
+    const poster = document.createElement('div');
+    poster.id = 'inspect-media-poster';
+    poster.style.cssText = 'position:absolute;inset:0;background:#d87b98';
+    const video = document.createElement('video');
+    video.id = 'inspect-video';
+    video.setAttribute('aria-label', 'Gallery clip');
+    video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.8;background:#222';
+    shell.append(poster, video);
+    document.body.append(shell);
+  });
+  await frame.locator('#inspect-media-poster').hover();
+  await frame.waitForFunction(() => document.querySelector('#inspect-video')?.hasAttribute('data-uidit-hover'));
+  await frame.locator('#inspect-media-poster').click();
+  await frame.waitForFunction(() => document.querySelector('#inspect-video')?.getAttribute('data-uidit-selected') === '1');
+  assert.equal(await frame.locator('#inspect-media-poster').getAttribute('data-uidit-selected'), null, 'a pointer-transparent video overlay is selected ahead of its poster layer');
+  await frame.locator('#inspect-media-shell').evaluate((el) => el.remove());
   await frame.locator('#pay').click();
   await frame.waitForFunction(() => document.querySelector('#pay')?.getAttribute('data-uidit-selected') === '1');
   assert.notEqual(await frame.locator('#pay').getAttribute('contenteditable'), 'true', 'the first click selects without editing text');

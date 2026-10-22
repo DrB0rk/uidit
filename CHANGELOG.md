@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.9 — 2026-10-22
+
+- Inspect selects visible video layers even when the page disables their pointer events.
+- Move team review sharing from Feedback into its own Team tab.
+
 ## 0.10.8 — 2026-10-22
 
 - Complete the stdio MCP bridge for prompts and forward prompt, resource, and tool list-change notifications.

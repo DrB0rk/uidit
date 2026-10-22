@@ -446,6 +446,7 @@ const TABS = [
   ['feedback', 'Feedback'],
   ['inspect', 'Inspect'],
   ['changes', 'Changes'],
+  ['share', 'Team'],
 ];
 
 export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSelect, actions, onOverlay, onStatus, page, collaboration, tab: controlledTab, onTab, showTabs = true }) {
@@ -532,7 +533,6 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
       {tab === 'feedback' && (
         <div className="panel" role="tabpanel" id="panel-feedback" aria-labelledby={showTabs ? 'tab-feedback' : undefined}>
           <div className="panel-heading"><h2>Feedback</h2><span>{openCount} open</span></div>
-          <ShareReview collaboration={collaboration} actions={actions} onStatus={onStatus} busy={busy} setBusy={setBusy} />
           <SelectionBox selected={selected} onComment={comment} onOverlay={onOverlay} busy={busy} onStatus={onStatus} />
           <div className="feedback-filters"><label><span className="sr-only">Filter comments</span><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="open">Open · {openCount}</option><option value="all">All · {session.comments.length}</option><option value="resolved">Resolved · {session.comments.length - openCount}</option></select></label><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes, pages, selectors" aria-label="Search notes, pages, and selectors" /><button type="button" className="btn sm ghost" onClick={() => setShowTriage((shown) => !shown)}>{showTriage ? 'Hide triage' : 'Triage'}</button></div>
           {showTriage && <FeedbackTriage comments={session.comments} elements={session.elements} />}
@@ -611,6 +611,13 @@ export default function Sidebar({ session, selectedId, anchorStatuses = {}, onSe
             ))}
             {[...session.proposals].reverse().map((proposal) => <ProposalItem key={proposal.id} proposal={proposal} element={session.elements.find((item) => item.id === proposal.elementId)} selected={selected?.id === proposal.elementId} onOverlay={onOverlay} onUpdate={actions.updateProposal} onStatus={onStatus} />)}
           </ul>
+        </div>
+      )}
+
+      {tab === 'share' && (
+        <div className="panel" role="tabpanel" id="panel-share" aria-labelledby={showTabs ? 'tab-share' : undefined}>
+          <div className="panel-heading"><h2>Team review</h2><span>{collaboration?.enabled ? `${collaboration.participants?.length ?? 0} online` : 'Private'}</span></div>
+          <ShareReview collaboration={collaboration} actions={actions} onStatus={onStatus} busy={busy} setBusy={setBusy} />
         </div>
       )}
 

@@ -865,6 +865,33 @@
       .catch((err) => post('error', { message: err.message }));
   }
 
+  function inspectTargetAt(event) {
+    let target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
+    if (!target || target.closest?.('[data-uidit-ui]')) return target;
+    if (target.matches?.('a,button,input,select,textarea,[role="button"]') || target.closest?.('a,button,input,select,textarea,[role="button"]')) return target;
+
+    // Decorative video layers often opt out of pointer hit testing so links or
+    // poster content below them still work. In Inspect mode, prefer the visible
+    // video when it shares the hit target's media wrapper.
+    for (let owner = target; owner && owner !== document.documentElement; owner = owner.parentElement) {
+      const video = [...owner.children].find((child) => {
+        if (child.tagName !== 'VIDEO') return false;
+        const rect = child.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return false;
+        let opacity = 1;
+        for (let node = child; node && node.nodeType === 1; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
+          opacity *= Number(style.opacity);
+          if (opacity <= 0.05) return false;
+        }
+        return child.getClientRects().length > 0;
+      });
+      if (video) return video;
+    }
+    return target;
+  }
+
   const contextMenu = document.createElement('div');
   contextMenu.id = 'uidit-context-menu';
   contextMenu.className = 'uidit-context-menu';
@@ -1075,6 +1102,7 @@
   function onClick(ev) {
     if (state.mode !== 'inspect') return;
     if (ev.target.closest?.('[data-uidit-ui]')) return;
+    const target = inspectTargetAt(ev);
     if (textEditing?.el.contains(ev.target)) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -1086,21 +1114,21 @@
     const selected = state.selected?.el;
     // A child is a separate inspect target. Only a second click on the exact
     // same element switches into inline text editing.
-    if (selected && selected === ev.target) {
+    if (selected && selected === target) {
       beginTextEditing();
       placeTextCaret(ev);
       return;
     }
     if (textEditing) {
-      finishTextEditing(true).then(() => select(ev.target));
+      finishTextEditing(true).then(() => select(target));
       return;
     }
-    select(ev.target);
+    select(target);
   }
 
   function onMove(ev) {
     if (state.mode !== 'inspect') return;
-    const el = ev.target;
+    const el = inspectTargetAt(ev);
     if (el === hoverEl) return;
     if (hoverEl && hoverEl !== state.selected?.el) paint(hoverEl, false);
     hoverEl = el;
